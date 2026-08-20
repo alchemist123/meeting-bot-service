@@ -1,15 +1,16 @@
 # Vexa Lite (meetings-only)
 
 The whole meeting-bot control plane in **one container**. The simplest way to self-host —
-`make lite` from the repo root provisions PostgreSQL + MinIO and runs everything else in a single
-image.
+`make lite` from the repo root provisions PostgreSQL + MinIO + Redis and runs everything else in a
+single image.
 
 ## Why
 
 Everything except the datastores runs in one container — gateway, admin-api, meeting-api,
-runtime, redis, and the X11/audio stack. No Docker socket, no per-service containers. The runtime
+runtime, and the X11/audio stack. No Docker socket, no per-service containers. The runtime
 uses the **process backend**: meeting bots run as **child processes** inside the container, not
-socket-spawned containers.
+socket-spawned containers. Redis runs as its own sidecar (not in-container) so it survives an
+app-container restart/rebuild with its queued state intact.
 
 - One app container instead of five
 - Full meeting-bot API (join → capture → transcribe → transcript + recording) — no agent/copilot
@@ -24,8 +25,8 @@ From the repo root:
 make lite
 ```
 
-Provisions a PostgreSQL + MinIO sidecar, builds the lite image, starts everything on the host
-network, and probes the front door. Set `TRANSCRIPTION_SERVICE_URL` / `TRANSCRIPTION_SERVICE_TOKEN`
+Provisions PostgreSQL + MinIO + Redis sidecars, builds the lite image, starts everything on the
+host network, and probes the front door. Set `TRANSCRIPTION_SERVICE_URL` / `TRANSCRIPTION_SERVICE_TOKEN`
 in the repo-root `.env` for transcripts (get a token at `vexa.ai/account`, or self-host
 [`deploy/transcription`](../transcription/) on a GPU).
 
@@ -58,7 +59,7 @@ After it finishes:
 - **API:** `http://YOUR_IP:8056` (the gateway — auth, routing) · docs at `/docs`
 
 To stop: `make down` (data volumes are kept; `docker volume rm vexa-lite-pgdata
-vexa-lite-miniodata` to wipe).
+vexa-lite-miniodata vexa-lite-redisdata` to wipe).
 
 ## What's inside
 
@@ -70,10 +71,11 @@ Supervised by `supervisord`:
 | admin-api | 8001 | users + API keys + `/internal/validate` |
 | meeting-api | 8080 | bots, transcripts, recordings (→ MinIO) |
 | runtime | 8090 | spawns the bot as a **child process** (process backend) |
-| redis | 6379 | bus + scheduler (internal) |
 | Xvfb · fluxbox · PulseAudio | :99 | display + audio for the headful bot browser |
 
-External (the `make lite` sidecars): **PostgreSQL** (metadata) and **MinIO** (recordings).
+External (the `make lite` sidecars): **PostgreSQL** (metadata), **MinIO** (recordings), and
+**Redis** (bus + scheduler) — each its own container on the `vexa-lite-net` bridge, each with a
+persistent named volume.
 
 ### Architecture
 
@@ -84,16 +86,16 @@ External (the `make lite` sidecars): **PostgreSQL** (metadata) and **MinIO** (re
 |  gateway  admin-api  meeting-api  runtime                    |
 |   :8056     :8001      :8080       :8090                      |
 |                                                              |
-|  redis   Xvfb  fluxbox  PulseAudio                           |
-|   :6379   :99                                                |
+|  Xvfb  fluxbox  PulseAudio                                   |
+|   :99                                                        |
 |                                                              |
 |  bot processes (Playwright)                                  |
 |     ← runtime spawns as child processes (process backend)    |
 +--------------------------------------------------------------+
-        |                    |                    |
-        v                    v                    v
-   Transcription        PostgreSQL             MinIO
-     (external)         (sidecar)             (sidecar)
+        |            |                |                |
+        v            v                v                v
+   Transcription  PostgreSQL        MinIO             Redis
+     (external)   (sidecar)       (sidecar)         (sidecar)
 ```
 
 ## Configuration
@@ -124,5 +126,4 @@ docker exec vexa-lite ps aux | grep dist/index.js # running bot processes
 | Issue | Note |
 |---|---|
 | Shared X11 display | bots share one Xvfb (`:99`) — best for one browser session at a time |
-| Ephemeral redis | internal redis is in-container; mount `/var/lib/redis` for persistence |
 | No browser debug view | this build drops the noVNC/x11vnc viewer for a pure API surface; debug via `docker logs` |

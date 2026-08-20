@@ -15,7 +15,10 @@ echo "=============================================="
 echo "  Vexa Lite (meetings-only) — starting container"
 echo "=============================================="
 
-# ─── Redis (internal by default; an external REDIS_URL is honored) ────────────────────────────────
+# ─── Redis — an EXTERNAL sidecar (deploy/lite/Makefile runs one alongside Postgres/MinIO and passes
+#     REDIS_HOST via `docker run -e`). The `localhost` fallback here only matters for a manually
+#     `docker run` container with no sidecar (same convention as DB_HOST below) — it will fail to
+#     connect, same as a misconfigured DB_HOST would.
 if [ -z "${REDIS_URL:-}" ]; then
     export REDIS_HOST="${REDIS_HOST:-localhost}"
     export REDIS_PORT="${REDIS_PORT:-6379}"
@@ -69,8 +72,6 @@ export BOT_COMMAND="${BOT_COMMAND:-/usr/local/bin/vexa-bot-launch}"
 # The public API base URL (informational — printed below; not consumed by any service in this
 # meetings-only build since there is no UI to configure).
 export VEXA_PUBLIC_API_URL="${VEXA_PUBLIC_API_URL:-http://localhost:8056}"
-
-mkdir -p /var/lib/redis /var/run/redis
 
 echo "Configuration:"
 echo "  - Redis URL:        ${REDIS_URL}"

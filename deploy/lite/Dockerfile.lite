@@ -3,10 +3,10 @@
 # Vexa Lite (meetings-only) — all-in-one Docker image
 # =============================================================================
 # One container runs the whole meeting-bot control plane — gateway (:8056) · admin-api (:8001) ·
-# meeting-api (:8080) · runtime (:8090) — over an internal redis + a shared Xvfb/PulseAudio stack.
-# The runtime uses the PROCESS backend (RUNTIME_BACKEND=process): bots run as CHILD PROCESSES,
-# not docker-socket-spawned containers — so lite needs NO docker socket. PostgreSQL + MinIO are
-# external (the `make lite` sidecars).
+# meeting-api (:8080) · runtime (:8090) — over a shared Xvfb/PulseAudio stack. The runtime uses
+# the PROCESS backend (RUNTIME_BACKEND=process): bots run as CHILD PROCESSES, not
+# docker-socket-spawned containers — so lite needs NO docker socket. PostgreSQL, MinIO, and Redis
+# are external (the `make lite` sidecars).
 #
 # This is a meetings-only fork of Vexa's own deploy/lite: no agent domain (chat/routines/sandboxed
 # coding agents), no terminal/dashboard UI, no VNC debug viewer — just the meeting-bot capture API.
@@ -54,12 +54,12 @@ RUN cd /build && node core/meetings/services/bot/warm-hf-cache.mjs || echo "[bot
 FROM mcr.microsoft.com/playwright:v1.56.0-jammy AS final
 ENV DEBIAN_FRONTEND=noninteractive
 
-# System stack: Python (the 4 services) · supervisor · redis · X11/audio (Xvfb/fluxbox/pulse) ·
+# System stack: Python (the 4 services) · supervisor · X11/audio (Xvfb/fluxbox/pulse) ·
 # postgres client (pg_isready). No noVNC/x11vnc — this image exposes the API only, not a browser
-# debug view.
+# debug view. Redis is an EXTERNAL sidecar (see deploy/lite/Makefile) — no redis-server here.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       python3 python3-pip python3-venv python3-dev build-essential \
-      supervisor redis-server postgresql-client \
+      supervisor postgresql-client \
       xvfb fluxbox \
       pulseaudio xdotool xclip socat ffmpeg libsndfile1 \
       curl ca-certificates \
@@ -75,7 +75,7 @@ ENV UV_LINK_MODE=copy \
     DISPLAY=:99
 
 WORKDIR /app
-RUN mkdir -p /var/log/supervisor /var/lib/redis /var/run/redis
+RUN mkdir -p /var/log/supervisor
 
 # ── Python venvs — one per service (avoids cross-service dependency-pin conflicts). Each mirrors
 #    that service's Dockerfile (uv sync --frozen + the production-only ASGI/DB extras). ────────────

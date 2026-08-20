@@ -1,9 +1,11 @@
 # =============================================================================
 # Vexa Lite (meetings-only) — single-container build + deploy
 # =============================================================================
-# `make lite` (from repo root) → this Makefile's `all`: provisions PostgreSQL + MinIO sidecar
-# containers, pulls/builds the all-in-one image, runs it on the host network with the process
-# backend, and verifies the front door. The app image is lean; postgres/minio stay external.
+# `make lite` (from repo root) → this Makefile's `all`: provisions PostgreSQL + MinIO + Redis
+# sidecar containers, pulls/builds the all-in-one image, runs it on the host network with the
+# process backend, and verifies the front door. The app image is lean; postgres/minio/redis
+# stay external (redis as its own container means it survives an app-container rebuild/restart,
+# unlike an in-container redis).
 .PHONY: all up down init-db test env preflight build push build-and-push set-latest set-dev setup-builder help stt-smoke
 
 # --- Paths ---
@@ -30,6 +32,7 @@ LAST_TAG_FILE  := $(ROOT)/deploy/lite/.last-tag
 NETWORK         ?= vexa-lite-net
 PG_CONTAINER    ?= vexa-lite-postgres
 MINIO_CONTAINER ?= vexa-lite-minio
+REDIS_CONTAINER ?= vexa-lite-redis
 APP_CONTAINER   ?= vexa-lite
 HOST_GATEWAY_PORT   ?= 8056
 MINIO_ACCESS_KEY ?= vexa-access-key
@@ -84,8 +87,9 @@ env:
 preflight:
 	@docker info > /dev/null 2>&1 || { echo "ERROR: Docker is not running."; exit 1; }
 
-## up — a bridge network, postgres + minio sidecars (by name), then the all-in-one container with
-## only the front doors published. Internal services live on the container's own loopback.
+## up — a bridge network, postgres + minio + redis sidecars (by name), then the all-in-one
+## container with only the front door published. Internal services live on the container's own
+## loopback.
 ##
 ## The recipe is ONE `\`-continued shell command: a bare `#` line inside it (no trailing `\`) ends
 ## the continuation, so make runs the rest in a SEPARATE shell where IMG/ADMIN_TK/… are already
@@ -132,6 +136,14 @@ up: preflight
 		docker run --rm --network $(NETWORK) --entrypoint sh minio/mc:latest -c \
 			"mc alias set vexa http://$(MINIO_CONTAINER):9000 $(MINIO_ACCESS_KEY) $(MINIO_SECRET_KEY) && mc mb --ignore-existing vexa/$(MINIO_BUCKET)" >/dev/null 2>&1 || true; \
 	fi; echo "  ✓ MinIO ready"; \
+	echo "Starting Redis ($(REDIS_CONTAINER))..."; \
+	if ! docker ps -q -f name=$(REDIS_CONTAINER) | grep -q .; then \
+		docker rm -f $(REDIS_CONTAINER) 2>/dev/null || true; \
+		docker run -d --name $(REDIS_CONTAINER) --network $(NETWORK) --restart unless-stopped \
+			-v vexa-lite-redisdata:/data \
+			redis:7-alpine redis-server --appendonly yes --appendfsync everysec > /dev/null; \
+		for i in $$(seq 1 24); do docker exec $(REDIS_CONTAINER) redis-cli ping 2>/dev/null | grep -q PONG && break; sleep 2; done; \
+	fi; echo "  ✓ Redis ready"; \
 	if [ -n "$(LOCAL_STT)" ]; then \
 		echo "Starting local CPU STT ($(WHISPER_CONTAINER), $(WHISPER_MODEL))..."; \
 		if ! docker ps -q -f name=$(WHISPER_CONTAINER) | grep -q .; then \
@@ -152,6 +164,7 @@ up: preflight
 		--env-file "$(ENV_FILE)" \
 		-p $(HOST_GATEWAY_PORT):8056 \
 		-e DB_HOST=$(PG_CONTAINER) -e DB_PORT=5432 -e DB_NAME=vexa -e DB_USER=postgres -e DB_PASSWORD=postgres \
+		-e REDIS_HOST=$(REDIS_CONTAINER) -e REDIS_PORT=6379 \
 		-e ADMIN_API_TOKEN="$$ADMIN_TK" -e ADMIN_TOKEN="$$ADMIN_TK" \
 		-e TRANSCRIPTION_SERVICE_URL="$$TX_URL" -e TRANSCRIPTION_SERVICE_TOKEN="$$TX_TOKEN" \
 		-e MINIO_ENDPOINT=$(MINIO_CONTAINER):9000 -e MINIO_ACCESS_KEY=$(MINIO_ACCESS_KEY) \
@@ -171,10 +184,11 @@ test:
 	@if curl -sf -o /dev/null http://localhost:$(HOST_GATEWAY_PORT)/health 2>/dev/null; then \
 		echo "  ✓ gateway (:$(HOST_GATEWAY_PORT))"; else echo "  ✗ gateway not responding (:$(HOST_GATEWAY_PORT))"; exit 1; fi
 
-## down — stop + remove app + sidecars + network (volumes persist; `docker volume rm vexa-lite-pgdata vexa-lite-miniodata` to wipe).
+## down — stop + remove app + sidecars + network (volumes persist; `docker volume rm
+## vexa-lite-pgdata vexa-lite-miniodata vexa-lite-redisdata` to wipe).
 down:
 	@echo "Stopping Vexa Lite..."
-	@docker rm -f $(APP_CONTAINER) $(PG_CONTAINER) $(MINIO_CONTAINER) $(WHISPER_CONTAINER) 2>/dev/null || true
+	@docker rm -f $(APP_CONTAINER) $(PG_CONTAINER) $(MINIO_CONTAINER) $(REDIS_CONTAINER) $(WHISPER_CONTAINER) 2>/dev/null || true
 	@docker network rm $(NETWORK) 2>/dev/null || true
 	@echo "  ✓ Stopped (data volumes kept)"
 
