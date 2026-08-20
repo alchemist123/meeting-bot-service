@@ -1,0 +1,20 @@
+# Workspace packages. Globs match dirs that have a package.json; empty dirs are ignored
+# (so this is green-on-empty). Meetings-only scope: the capture-domain services + modules
+# (bot, meeting-api-adjacent TS, and the capture pipeline bricks) — no agent domain, no UI clients.
+packages:
+  - "core/runtime"
+  - "core/gateway"
+  - "core/meetings/services/*"
+  - "core/meetings/modules/*"
+  - "core/identity/services/*"
+  - "core/identity/modules/*"
+# Build scripts pnpm may run (pnpm ≥10 blocks postinstall by default). esbuild
+# ships the native binary our TS test runner (tsx) needs; onnxruntime-node (+ its
+# transitive sharp/protobufjs, via @huggingface/transformers in @vexa/mixed-pipeline)
+# fetches the native ONNX runtime the pyannote segmenter runs on in production. The
+# mixed-pipeline goldens are model-free, so the gate stays green even before download.
+allowBuilds:
+  esbuild: true
+  onnxruntime-node: true
+  protobufjs: true
+  sharp: true
