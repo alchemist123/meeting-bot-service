@@ -69,11 +69,11 @@ all: env preflight up init-db test
 	echo "  API docs:  http://$$HOST:$(HOST_GATEWAY_PORT)/docs"; \
 	echo "  API key:   docker logs $(APP_CONTAINER) | grep VEXA_API_KEY"
 
-## env — ensure a repo-root .env exists (seed from compose/.env if present, else a minimal template).
+## env — ensure a repo-root .env exists (seed from .env.example if present, else a minimal template).
 env:
 	@if [ ! -f "$(ENV_FILE)" ]; then \
-		if [ -f "$(ROOT)/deploy/compose/.env" ]; then \
-			echo "Seeding $(ENV_FILE) from deploy/compose/.env"; cp "$(ROOT)/deploy/compose/.env" "$(ENV_FILE)"; \
+		if [ -f "$(ROOT)/.env.example" ]; then \
+			echo "Seeding $(ENV_FILE) from .env.example"; cp "$(ROOT)/.env.example" "$(ENV_FILE)"; \
 		else \
 			echo "Creating minimal $(ENV_FILE) (edit TRANSCRIPTION_SERVICE_* for transcripts)"; \
 			printf 'ADMIN_TOKEN=changeme\nTRANSCRIPTION_SERVICE_URL=\nTRANSCRIPTION_SERVICE_TOKEN=\nIMAGE_TAG=v012\n' > "$(ENV_FILE)"; \
@@ -105,7 +105,7 @@ preflight:
 up: preflight
 	@set -e; \
 	docker network inspect $(NETWORK) >/dev/null 2>&1 || docker network create $(NETWORK) >/dev/null; \
-	envv() { grep -E "^$$1=" $(ENV_FILE) 2>/dev/null | head -1 | cut -d= -f2- | sed -E 's/[[:space:]]+#.*$$//; s/[[:space:]]+$$//'; }; \
+	envv() { grep -E "^$$1=" "$(ENV_FILE)" 2>/dev/null | head -1 | cut -d= -f2- | sed -E 's/[[:space:]]+#.*$$//; s/[[:space:]]+$$//'; }; \
 	ADMIN_TK=$$(envv ADMIN_TOKEN); ADMIN_TK=$${ADMIN_TK:-changeme}; \
 	TX_URL=$$(envv TRANSCRIPTION_SERVICE_URL); \
 	TX_TOKEN=$$(envv TRANSCRIPTION_SERVICE_TOKEN); \
@@ -149,7 +149,7 @@ up: preflight
 	echo "Starting Vexa Lite ($$IMG)..."; \
 	docker rm -f $(APP_CONTAINER) 2>/dev/null || true; \
 	docker run -d --name $(APP_CONTAINER) --shm-size=2g --network $(NETWORK) --restart unless-stopped \
-		--env-file $(ENV_FILE) \
+		--env-file "$(ENV_FILE)" \
 		-p $(HOST_GATEWAY_PORT):8056 \
 		-e DB_HOST=$(PG_CONTAINER) -e DB_PORT=5432 -e DB_NAME=vexa -e DB_USER=postgres -e DB_PASSWORD=postgres \
 		-e ADMIN_API_TOKEN="$$ADMIN_TK" -e ADMIN_TOKEN="$$ADMIN_TK" \
@@ -202,7 +202,7 @@ stt-smoke:
 
 # ── Image build / publish ──────────────────────────────────────────────────────────────────────────
 build: preflight
-	docker build -f $(DOCKERFILE) -t $(LOCAL_TAG) $(CONTEXT)
+	docker build -f "$(DOCKERFILE)" -t $(LOCAL_TAG) "$(CONTEXT)"
 	@echo "Built $(LOCAL_TAG)"
 
 setup-builder:
@@ -211,8 +211,8 @@ setup-builder:
 
 push: setup-builder
 	docker buildx build --builder $(BUILDER_NAME) --platform $(PLATFORMS) \
-		-f $(DOCKERFILE) -t $(UNIQUE_DOCKERHUB_TAG) --push $(CONTEXT)
-	@echo "$(UNIQUE_TAG)" > $(LAST_TAG_FILE)
+		-f "$(DOCKERFILE)" -t $(UNIQUE_DOCKERHUB_TAG) --push "$(CONTEXT)"
+	@echo "$(UNIQUE_TAG)" > "$(LAST_TAG_FILE)"
 	$(call set_tag,dev,$(UNIQUE_TAG))
 
 build-and-push: push

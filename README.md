@@ -19,12 +19,20 @@ an API, this is that, and nothing else.
 
 ## Quickstart
 
-Single-container deploy. Linux (Ubuntu 24.04) is the production target; a Mac with Docker
-Desktop works fine for local evaluation.
+Two deploy shapes, same code — pick one:
 
-**Prerequisites** — `make`, Docker engine ≥ v26, and (for transcripts) either a free token at
-[vexa.ai/account](https://vexa.ai/account) or the bundled local CPU whisper (see below). Without
-transcription, bots still join and record — they just produce no text.
+- **`make lite`** — single container, meeting bots run as **child processes**. Fastest to stand
+  up, no Docker socket needed. See [`deploy/lite`](deploy/lite/).
+- **`make compose`** — per-service containers, each meeting bot spawned in its **own container**
+  over the Docker socket — closer to a production shape, full per-bot isolation. See
+  [`deploy/compose`](deploy/compose/).
+
+Linux (Ubuntu 24.04) is the production target; a Mac with Docker Desktop works fine for local
+evaluation. **Prerequisites** — `make`, Docker engine ≥ v26, and (for transcripts) either a free
+token at [vexa.ai/account](https://vexa.ai/account) or the bundled local CPU whisper (see below).
+Without transcription, bots still join and record — they just produce no text.
+
+### Lite (single container)
 
 ```bash
 git clone <this-repo> vexa-lite && cd vexa-lite
@@ -33,14 +41,20 @@ make lite                # provisions Postgres + MinIO, builds, runs, verifies
 docker logs vexa-lite | grep VEXA_API_KEY    # grab your API key
 ```
 
-### No token, no GPU — `LOCAL_STT=1`
+No token, no GPU — `make -C deploy/lite up LOCAL_STT=1` runs a bundled faster-whisper CPU server
+and auto-wires transcription: real transcripts, zero setup, slower than a GPU. See
+[`deploy/lite/README.md`](deploy/lite/README.md).
+
+### Compose (bot-per-container)
 
 ```bash
-make -C deploy/lite up LOCAL_STT=1
+cd deploy/compose
+cp .env.example .env     # then set TRANSCRIPTION_SERVICE_URL/_TOKEN if you have a token
+make bot                 # build the meeting-bot image (one-time, or after bot changes)
+make dev                 # build the 4 core services from this checkout + bring the stack up
 ```
 
-Runs a bundled faster-whisper CPU server and auto-wires transcription — real transcripts, zero
-setup, slower than a GPU. See [`deploy/lite/README.md`](deploy/lite/README.md).
+See [`deploy/compose/README.md`](deploy/compose/README.md).
 
 ### Drive it over the API
 
@@ -93,14 +107,15 @@ at `/docs` on a running gateway.
 
 ## What's inside
 
-Four services in one container (see [`deploy/lite`](deploy/lite/)):
+The same four services, either bundled in one container ([`deploy/lite`](deploy/lite/)) or as
+separate containers ([`deploy/compose`](deploy/compose/)):
 
 | Service | Role |
 |---|---|
 | **gateway** | the one front door — API-key auth, scopes, routing, `/ws` fan-out |
 | **admin-api** | identity — users, API keys, `/internal/validate` |
 | **meeting-api** | bot spawn, lifecycle FSM, transcript collector, recordings, webhooks, calendar sync |
-| **runtime** | the kernel — spawns the meeting bot as a child process |
+| **runtime** | the kernel — spawns the meeting bot (child process in lite, its own container in compose) |
 
 The bot (TypeScript, Playwright) joins the call, captures audio, and streams it to an external
 STT endpoint; `meeting-api` assembles the speaker-attributed transcript and exposes it over the
@@ -116,7 +131,8 @@ core/
   meetings/   capture domain — meeting-api, the bot, and every capture module
                 (gmeet/teams/zoom/jitsi, transcribe-whisper, recording, …)
 deploy/
-  lite/           single-container all-in-one deploy (the supported path)
+  lite/           single-container all-in-one deploy — bots as child processes
+  compose/        per-service containers — each bot spawned in its own container
   transcription/  optional self-hosted GPU/CPU STT worker
 ```
 

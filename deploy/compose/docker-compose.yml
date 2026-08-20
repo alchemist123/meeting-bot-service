@@ -1,0 +1,274 @@
+name: vexa-lite
+# Meeting-bot control plane, per-service containers (P4-derived). Infra (postgres:17 · redis:7 ·
+# minio + minio-init) plus the four long-running Python services — admin-api · runtime ·
+# meeting-api · gateway — each building its own slim uv-based image. Every service carries a
+# healthcheck; depends_on waits on `condition: service_healthy` so bring-up is ordered + observable.
+#
+# Bot is NOT a compose service: runtime spawns BROWSER_IMAGE (built locally with `make bot`) on
+# demand via the mounted /var/run/docker.sock — one container per meeting, isolated from the
+# control plane and from each other. This is the "own container per bot" deploy mode; see
+# ../lite for the single-container/child-process alternative.
+
+services:
+  # ─── Infrastructure ───────────────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - redis-data:/data
+    networks: [vexa]
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17-alpine
+    command: ["postgres", "-c", "idle_in_transaction_session_timeout=60000"]
+    environment:
+      - POSTGRES_DB=${DB_NAME:-vexa}
+      - POSTGRES_USER=${DB_USER:-postgres}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-postgres}
+      # The backend operates only in UTC. Pin the DB clock to UTC so func.now()/server_default/
+      # onupdate (the naive timestamp columns' server-side values) are guaranteed UTC.
+      - TZ=UTC
+      - PGTZ=UTC
+    ports:
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5458}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-vexa}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks: [vexa]
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ACCESS_KEY:-vexa-access-key}
+      - MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY:-vexa-secret-key}
+    ports:
+      - "127.0.0.1:${MINIO_HOST_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_HOST_PORT:-9001}:9001"
+    healthcheck:
+      test: ["CMD-SHELL", "mc ready local || curl -sf http://localhost:9000/minio/health/live || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - minio-data:/data
+    networks: [vexa]
+    restart: unless-stopped
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        mc alias set vexa http://minio:9000 $${MINIO_ROOT_USER:-vexa-access-key} $${MINIO_ROOT_PASSWORD:-vexa-secret-key}
+        mc mb --ignore-existing vexa/${MINIO_BUCKET:-vexa}
+        exit 0
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ACCESS_KEY:-vexa-access-key}
+      - MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY:-vexa-secret-key}
+    networks: [vexa]
+
+  # ─── Core services ────────────────────────────────────────────────────────────────────────────
+  admin-api:
+    build:
+      context: ../../core/identity/services/admin-api
+      dockerfile: Dockerfile
+    image: vexa-lite/admin-api:${IMAGE_TAG:-dev}
+    ports:
+      - "127.0.0.1:${ADMIN_API_PORT:-18057}:8001"
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=${DB_NAME:-vexa}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres}
+      - ADMIN_API_TOKEN=${ADMIN_TOKEN:-changeme}
+      - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-vexa-internal-secret}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8001/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    init: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [vexa]
+    restart: unless-stopped
+
+  runtime:
+    build:
+      context: ../../core/runtime
+      dockerfile: Dockerfile
+    image: vexa-lite/runtime:${IMAGE_TAG:-dev}
+    # The runtime spawns bot containers via the host Docker socket (DockerBackend → socket API,
+    # requests_unixsocket — no docker CLI in the image).
+    group_add:
+      - "${DOCKER_GID:-0}"
+    ports:
+      - "127.0.0.1:${RUNTIME_API_PORT:-18090}:8090"
+    environment:
+      - BROWSER_IMAGE=${BROWSER_IMAGE:-vexa-lite/vexa-bot:dev}
+      # Optional low-latency tuning for the Google Meet speaker-stream pipeline. Empty values keep
+      # the bot defaults; runtime forwards configured values to spawned bot containers.
+      - BOT_SPEAKER_MIN_AUDIO_SEC=${BOT_SPEAKER_MIN_AUDIO_SEC:-}
+      - BOT_SPEAKER_SUBMIT_INTERVAL_SEC=${BOT_SPEAKER_SUBMIT_INTERVAL_SEC:-}
+      - BOT_SPEAKER_CONFIRM_THRESHOLD=${BOT_SPEAKER_CONFIRM_THRESHOLD:-}
+      - BOT_SPEAKER_MAX_BUFFER_SEC=${BOT_SPEAKER_MAX_BUFFER_SEC:-}
+      - BOT_SPEAKER_IDLE_TIMEOUT_SEC=${BOT_SPEAKER_IDLE_TIMEOUT_SEC:-}
+      - REDIS_URL=redis://redis:6379/0
+      - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-vexa-internal-secret}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      # Spawn the bot onto THIS compose network so it resolves meeting-api:8080 (lifecycle callback)
+      # + redis. Must equal the project-prefixed network name (DockerBackend → HostConfig.NetworkMode).
+      - DOCKER_NETWORK=${COMPOSE_PROJECT_NAME:-vexa-lite}_vexa
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8090/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    init: true
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks: [vexa]
+    restart: unless-stopped
+
+  meeting-api:
+    build:
+      # Wider context (the carve root) than the other services: meeting_api validates at the seam
+      # and loads the sealed invocation/lifecycle/webhook/runtime/schedule schemas BY PATH, so
+      # those frozen contract files are vendored into the image (see the Dockerfile).
+      context: ../..
+      dockerfile: core/meetings/services/meeting-api/Dockerfile
+    image: vexa-lite/meeting-api:${IMAGE_TAG:-dev}
+    ports:
+      - "127.0.0.1:${MEETING_API_PORT:-18080}:8080"
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=${DB_NAME:-vexa}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres}
+      - REDIS_URL=redis://redis:6379/0
+      - RUNTIME_API_URL=http://runtime:8090
+      - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-vexa-internal-secret}
+      # The background sweeps' internal lookups: auto-join fetches per-user spawn context
+      # (/internal/users/{id}/bot-context) and calendar sync discovers connected ICS feeds
+      # (/internal/calendar-configs). Unset -> calendar sync no-ops, auto-join spawns uncapped.
+      - ADMIN_API_URL=http://admin-api:8001
+      # MeetingToken is signed (mint) AND verified (recordings upload) with ADMIN_TOKEN — the SAME
+      # admin secret admin-api holds (admin-api gets ADMIN_API_TOKEN=${ADMIN_TOKEN}).
+      - ADMIN_TOKEN=${ADMIN_TOKEN:-changeme}
+      # STT the spawned bot transcribes with — bot_spawn threads these into the invocation. Unset
+      # → bot joins+captures but no transcript.
+      - TRANSCRIPTION_SERVICE_URL=${TRANSCRIPTION_SERVICE_URL:-}
+      - TRANSCRIPTION_SERVICE_TOKEN=${TRANSCRIPTION_SERVICE_TOKEN:-}
+      # Deployment-level defaults for a spawn's transcribe/recording flags when the request does not
+      # say (config.v1 `defaulted` keys). TRANSCRIBE_ENABLED=false makes a no-STT deployment spawn
+      # capture-only bots instead of 503-ing every default POST /bots.
+      - TRANSCRIBE_ENABLED=${TRANSCRIBE_ENABLED:-true}
+      - RECORDING_ENABLED=${RECORDING_ENABLED:-true}
+      # Self-hosted Jitsi hostnames (comma-separated) recognized in pasted + calendar links.
+      - VEXA_JITSI_HOSTS=${VEXA_JITSI_HOSTS:-}
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio:9000}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-vexa-access-key}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-vexa-secret-key}
+      - MINIO_BUCKET=${MINIO_BUCKET:-vexa}
+      - MINIO_SECURE=${MINIO_SECURE:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    init: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      runtime:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    networks: [vexa]
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: ../../core/gateway/services/gateway
+      dockerfile: Dockerfile
+    image: vexa-lite/gateway:${IMAGE_TAG:-dev}
+    ports:
+      - "127.0.0.1:${API_GATEWAY_HOST_PORT:-18056}:8000"
+    environment:
+      - ADMIN_API_URL=http://admin-api:8001
+      - MEETING_API_URL=http://meeting-api:8080
+      - REDIS_URL=redis://redis:6379/0
+      - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-vexa-internal-secret}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      # fastapi-guard edge layer (edge_guard.py): per-IP throttle + auto-ban at the edge.
+      # ON by default with generous limits. Opt out with GUARD_ENABLED=false in .env.
+      # GUARD_WS_ENABLED is the optional /ws hook (off, opt-in): in-memory per-process — does
+      # NOT share ban/rate-limit state with the Redis-backed HTTP layer, and under uvicorn
+      # --workers N>1 each worker keeps an independent WS ban set.
+      - GUARD_ENABLED=${GUARD_ENABLED:-true}
+      - GUARD_WS_ENABLED=${GUARD_WS_ENABLED:-false}
+      - GUARD_ENABLE_REDIS=${GUARD_ENABLE_REDIS:-true}
+      - GUARD_RATE_LIMIT_RPM=${GUARD_RATE_LIMIT_RPM:-600}
+      - GUARD_RATE_LIMIT_WINDOW=${GUARD_RATE_LIMIT_WINDOW:-60}
+      - GUARD_AUTO_BAN_THRESHOLD=${GUARD_AUTO_BAN_THRESHOLD:-10}
+      - GUARD_AUTO_BAN_DURATION=${GUARD_AUTO_BAN_DURATION:-3600}
+      - GUARD_IP_WHITELIST=${GUARD_IP_WHITELIST:-}
+      - GUARD_IP_BLACKLIST=${GUARD_IP_BLACKLIST:-}
+      - GUARD_TRUSTED_PROXIES=${GUARD_TRUSTED_PROXIES:-}
+      - GUARD_TRUST_X_FORWARDED_PROTO=${GUARD_TRUST_X_FORWARDED_PROTO:-false}
+      - GUARD_BLOCKED_COUNTRIES=${GUARD_BLOCKED_COUNTRIES:-}
+      - GUARD_BLOCK_CLOUD_PROVIDERS=${GUARD_BLOCK_CLOUD_PROVIDERS:-}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    init: true
+    depends_on:
+      admin-api:
+        condition: service_healthy
+      meeting-api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks: [vexa]
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+  postgres-data:
+  minio-data:
+
+networks:
+  vexa:
+    driver: bridge

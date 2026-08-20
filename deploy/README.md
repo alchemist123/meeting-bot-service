@@ -1,17 +1,24 @@
 # deploy — running the meeting-bot control plane
 
-This meetings-only fork ships a single deploy target: **[`deploy/lite`](lite/)**, the all-in-one
-single-container image. It runs admin-api, runtime, meeting-api, and gateway as supervised
-processes over an internal redis + a shared Xvfb/PulseAudio stack; the runtime uses the
-**process backend** (`RUNTIME_BACKEND=process`), so meeting bots run as child processes — no
-Docker socket required. PostgreSQL + MinIO are external sidecars `make lite` provisions for you.
+Two deploy targets, same service code, different bot isolation model:
+
+| | [`deploy/lite`](lite/) | [`deploy/compose`](compose/) |
+|---|---|---|
+| Shape | one container, everything supervised | one container per service |
+| Bot isolation | child **process** (`RUNTIME_BACKEND=process`) | its own **container** (Docker socket) |
+| Docker socket | not needed | required |
+| Setup | `make lite` | `cd deploy/compose && make bot && make dev` |
+| Best for | quick eval, small teams, resource-constrained hosts | production-shaped isolation, per-bot resource limits |
+
+Both run the exact same admin-api / runtime / meeting-api / gateway code and the exact same bot;
+the only difference is how the runtime spawns the bot.
 
 ```bash
-make lite      # from the repo root — provisions Postgres + MinIO, builds, runs, verifies
+make lite      # from the repo root — single container, provisions Postgres + MinIO, builds, runs
 ```
 
-See [`deploy/lite/README.md`](lite/README.md) for the full configuration reference (transcription,
-recordings, the bundled CPU STT option).
+See [`deploy/lite/README.md`](lite/README.md) and [`deploy/compose/README.md`](compose/README.md)
+for the full configuration reference (transcription, recordings, the bundled CPU STT option).
 
 ## Transcription
 
