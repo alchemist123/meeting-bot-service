@@ -1,7 +1,7 @@
 # deploy/lite/bin — lite container helper scripts
 
 In-image scripts for the single-container [lite](../README.md) deployment. Copied to
-`/usr/local/bin` (or invoked by supervisord) inside `vexa-lite:dev`.
+`/usr/local/bin` (or invoked by supervisord) inside `bot-service-lite:dev`.
 
 | Script | Role |
 |---|---|

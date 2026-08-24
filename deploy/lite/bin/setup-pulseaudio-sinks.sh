@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# Vexa Lite — PulseAudio graph setup (runs once, after PulseAudio is up)
+# Bot Service Lite — PulseAudio graph setup (runs once, after PulseAudio is up)
 # =============================================================================
 # Builds the audio graph the bot's capture/speak path expects: a null sink (tts_sink) whose
 # monitor is remapped into a virtual microphone (virtual_mic). In the per-meeting bot

@@ -1,6 +1,6 @@
 <div align="center">
 
-# Vexa Lite (meetings-only)
+# Bot Service Lite (meetings-only)
 
 **Open-source, self-hosted meeting bot & transcription API.**
 
@@ -35,10 +35,10 @@ Without transcription, bots still join and record — they just produce no text.
 ### Lite (single container)
 
 ```bash
-git clone <this-repo> vexa-lite && cd vexa-lite
+git clone <this-repo> bot-service-lite && cd bot-service-lite
 cp .env.example .env     # then set TRANSCRIPTION_SERVICE_URL/_TOKEN if you have a token
 make lite                # provisions Postgres + MinIO, builds, runs, verifies
-docker logs vexa-lite | grep VEXA_API_KEY    # grab your API key
+docker logs bot-service-lite | grep VEXA_API_KEY    # grab your API key
 ```
 
 No token, no GPU — `make -C deploy/lite up LOCAL_STT=1` runs a bundled faster-whisper CPU server
@@ -65,7 +65,7 @@ export API_BASE=http://localhost:8056
 # send a bot into a live call
 curl -X POST "$API_BASE/bots" \
   -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
-  -d '{"platform":"google_meet","native_meeting_id":"abc-defg-hij","bot_name":"Vexa"}'
+  -d '{"platform":"google_meet","native_meeting_id":"abc-defg-hij","bot_name":"Bot Service"}'
 
 # read the transcript as it streams
 curl -H "X-API-Key: $API_KEY" "$API_BASE/transcripts/google_meet/abc-defg-hij"

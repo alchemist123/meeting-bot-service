@@ -16,7 +16,7 @@ set -uo pipefail
 
 N_BOTS="${N_BOTS:-2}"
 WINDOW="${WINDOW:-45}"                 # seconds bots must survive post-launch
-APP="${APP_CONTAINER:-vexa-lite}"
+APP="${APP_CONTAINER:-bot-service-lite}"
 GATEWAY="${GATEWAY_URL:-http://localhost:8056}"
 
 X() { docker exec "$APP" "$@"; }

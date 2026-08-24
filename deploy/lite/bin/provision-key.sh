@@ -1,10 +1,10 @@
 #!/bin/bash
 # =============================================================================
-# Vexa Lite — self-host API key provisioner
+# Bot Service Lite — self-host API key provisioner
 # =============================================================================
 # Runs in the background from the entrypoint. Once admin-api is up, mints (idempotently) a scoped
-# API token for a self-host user and writes it to /run/vexa/key.env, then prints it to container
-# stdout. There is no UI in this build — `docker logs` (or reading /run/vexa/key.env inside the
+# API token for a self-host user and writes it to /run/bot-service/key.env, then prints it to container
+# stdout. There is no UI in this build — `docker logs` (or reading /run/bot-service/key.env inside the
 # container) is the only way to retrieve it.
 #
 # No-op when VEXA_API_KEY was supplied by the operator (their key wins).
@@ -54,10 +54,10 @@ PY
 )
 
 if [ -n "$TOKS" ]; then
-    mkdir -p /run/vexa
-    printf '%s\n' "$TOKS" > /run/vexa/key.env
+    mkdir -p /run/bot-service
+    printf '%s\n' "$TOKS" > /run/bot-service/key.env
     echo "=============================================="
-    echo "  Vexa Lite — self-host API key provisioned"
+    echo "  Bot Service Lite — self-host API key provisioned"
     echo "=============================================="
     printf '%s\n' "$TOKS"
     echo "=============================================="

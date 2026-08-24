@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# Vexa Lite (meetings-only) — container entrypoint
+# Bot Service Lite (meetings-only) — container entrypoint
 # =============================================================================
 # 1. Normalizes the runtime env (every var supervisord references via %(ENV_X)s MUST exist,
 #    or supervisord refuses to start that program — so we default them all here).
@@ -12,7 +12,7 @@
 set -e
 
 echo "=============================================="
-echo "  Vexa Lite (meetings-only) — starting container"
+echo "  Bot Service Lite (meetings-only) — starting container"
 echo "=============================================="
 
 # ─── Redis — an EXTERNAL sidecar (deploy/lite/Makefile runs one alongside Postgres/MinIO and passes

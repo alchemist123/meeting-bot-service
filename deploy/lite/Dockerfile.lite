@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # =============================================================================
-# Vexa Lite (meetings-only) — all-in-one Docker image
+# Bot Service Lite (meetings-only) — all-in-one Docker image
 # =============================================================================
 # One container runs the whole meeting-bot control plane — gateway (:8056) · admin-api (:8001) ·
 # meeting-api (:8080) · runtime (:8090) — over a shared Xvfb/PulseAudio stack. The runtime uses
@@ -15,7 +15,7 @@
 # installs its own browser/X11/audio stack — it does NOT depend on the bot's published
 # meet-join-env base. The bot workspace is built from source in the bot-builder stage below.
 #
-#   Build:  docker build -f deploy/lite/Dockerfile.lite -t vexa-lite:dev .   (context = repo root)
+#   Build:  docker build -f deploy/lite/Dockerfile.lite -t bot-service-lite:dev .   (context = repo root)
 #   Run:    see deploy/lite/Makefile (`make lite`)
 # =============================================================================
 
@@ -129,7 +129,7 @@ ENV VEXA_HF_CACHE=/opt/hf-cache
 
 # ── Launchers, supervisor config, entrypoint ──────────────────────────────────────────────────────
 COPY deploy/lite/bin/vexa-bot-launch deploy/lite/bin/setup-pulseaudio-sinks.sh deploy/lite/bin/provision-key.sh /usr/local/bin/
-COPY deploy/lite/supervisord.conf /etc/supervisor/conf.d/vexa.conf
+COPY deploy/lite/supervisord.conf /etc/supervisor/conf.d/bot-service.conf
 COPY deploy/lite/entrypoint.sh /entrypoint.sh
 RUN chmod +x /usr/local/bin/vexa-bot-launch \
       /usr/local/bin/setup-pulseaudio-sinks.sh /usr/local/bin/provision-key.sh /entrypoint.sh
@@ -152,4 +152,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
     CMD curl -sf http://localhost:8056/health > /dev/null || exit 1
 
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["supervisord", "-n", "-c", "/etc/supervisor/conf.d/vexa.conf"]
+CMD ["supervisord", "-n", "-c", "/etc/supervisor/conf.d/bot-service.conf"]

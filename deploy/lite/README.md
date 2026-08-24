@@ -1,4 +1,4 @@
-# Vexa Lite (meetings-only)
+# Bot Service Lite (meetings-only)
 
 The whole meeting-bot control plane in **one container**. The simplest way to self-host —
 `make lite` from the repo root provisions PostgreSQL + MinIO + Redis and runs everything else in a
@@ -33,7 +33,7 @@ in the repo-root `.env` for transcripts (get a token at `vexa.ai/account`, or se
 Grab your API key once it's up:
 
 ```bash
-docker logs vexa-lite | grep VEXA_API_KEY
+docker logs bot-service-lite | grep VEXA_API_KEY
 ```
 
 ### Transcripts with no token and no GPU — `LOCAL_STT=1`
@@ -42,7 +42,7 @@ docker logs vexa-lite | grep VEXA_API_KEY
 make -C deploy/lite up LOCAL_STT=1
 ```
 
-Runs a bundled **faster-whisper CPU server on the tiny model** (`vexa-lite-whisper`) on the same
+Runs a bundled **faster-whisper CPU server on the tiny model** (`bot-service-lite-whisper`) on the same
 network and **auto-wires `TRANSCRIPTION_SERVICE_URL`** to it — real transcripts out of the box,
 slower than a GPU but zero setup. Verify it end-to-end (synthesize speech → transcribe):
 
@@ -58,8 +58,8 @@ After it finishes:
 
 - **API:** `http://YOUR_IP:8056` (the gateway — auth, routing) · docs at `/docs`
 
-To stop: `make down` (data volumes are kept; `docker volume rm vexa-lite-pgdata
-vexa-lite-miniodata vexa-lite-redisdata` to wipe).
+To stop: `make down` (data volumes are kept; `docker volume rm bot-service-lite-pgdata
+bot-service-lite-miniodata bot-service-lite-redisdata` to wipe).
 
 ## What's inside
 
@@ -74,14 +74,14 @@ Supervised by `supervisord`:
 | Xvfb · fluxbox · PulseAudio | :99 | display + audio for the headful bot browser |
 
 External (the `make lite` sidecars): **PostgreSQL** (metadata), **MinIO** (recordings), and
-**Redis** (bus + scheduler) — each its own container on the `vexa-lite-net` bridge, each with a
+**Redis** (bus + scheduler) — each its own container on the `bot-service-lite-net` bridge, each with a
 persistent named volume.
 
 ### Architecture
 
 ```
 +--------------------------------------------------------------+
-|                    Vexa Lite container                       |
+|                 Bot Service Lite container                   |
 |                                                              |
 |  gateway  admin-api  meeting-api  runtime                    |
 |   :8056     :8001      :8080       :8090                      |
@@ -106,7 +106,7 @@ The repo-root `.env` (see [`.env.example`](../../.env.example)):
 |---|---|---|
 | `TRANSCRIPTION_SERVICE_URL` / `_TOKEN` | — | STT endpoint + key for the bot's transcript pipeline. Unset → bots capture, no transcript. |
 | `ADMIN_TOKEN` | `changeme` | admin API token (the stack's shared admin secret) |
-| `IMAGE_TAG` | `latest` | the image tag to pull (a local `vexa-lite:dev` build wins) |
+| `IMAGE_TAG` | `latest` | the image tag to pull (a local `bot-service-lite:dev` build wins) |
 
 `make` variables (not `.env`) for the bundled local STT: `LOCAL_STT=1` (off by default),
 `WHISPER_MODEL` (`Systran/faster-whisper-tiny.en`), `WHISPER_IMAGE`, `HOST_STT_PORT` (`8083`). When
@@ -115,10 +115,10 @@ The repo-root `.env` (see [`.env.example`](../../.env.example)):
 ## Debugging
 
 ```bash
-docker logs -f vexa-lite                          # container logs
-docker exec vexa-lite supervisorctl status        # all supervised services
-docker exec vexa-lite supervisorctl restart meeting-api
-docker exec vexa-lite ps aux | grep dist/index.js # running bot processes
+docker logs -f bot-service-lite                          # container logs
+docker exec bot-service-lite supervisorctl status        # all supervised services
+docker exec bot-service-lite supervisorctl restart meeting-api
+docker exec bot-service-lite ps aux | grep dist/index.js # running bot processes
 ```
 
 ## Known limitations

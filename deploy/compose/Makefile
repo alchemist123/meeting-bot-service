@@ -4,10 +4,10 @@
 # its OWN container via the host Docker socket — the same isolation model upstream Vexa's compose
 # stack uses. There is no published image registry for this fork, so `make dev` always builds
 # from this checkout (no separate "pull the release" path).
-PROJECT ?= vexa-lite
+PROJECT ?= bot-service-lite
 COMPOSE  = docker compose -p $(PROJECT) -f docker-compose.yml
 REPO_ROOT := $(abspath ../..)
-BOT_IMAGE ?= vexa-lite/vexa-bot:dev
+BOT_IMAGE ?= bot-service-lite/bot-service-bot:dev
 EMAIL ?= self-host@vexa.ai
 SCOPES ?= bot,tx
 
@@ -94,7 +94,7 @@ _access:
 	   sleep 2; done; \
 	 echo ""; \
 	 echo "═══════════════════════════════════════════════════════════"; \
-	 echo "  Vexa Lite (compose) is up."; \
+	 echo "  Bot Service Lite (compose) is up."; \
 	 echo "    API gateway : http://localhost:$$GW  (docs at /docs)"; \
 	 if [ -n "$$KEY" ]; then echo "    API key     : $$KEY"; \
 	 else echo "    API key     : admin-api not ready — mint later with:"; \

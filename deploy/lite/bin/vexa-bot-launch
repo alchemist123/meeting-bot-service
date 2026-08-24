@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# Vexa Lite — meeting-bot launcher (process backend)
+# Bot Service Lite — meeting-bot launcher (process backend)
 # =============================================================================
 # The runtime kernel (RUNTIME_BACKEND=process) execs this once per meeting via the
 # meeting-bot profile (BOT_COMMAND). Unlike the bot's own container entrypoint, it does

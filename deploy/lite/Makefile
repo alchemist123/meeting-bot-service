@@ -1,5 +1,5 @@
 # =============================================================================
-# Vexa Lite (meetings-only) — single-container build + deploy
+# Bot Service Lite (meetings-only) — single-container build + deploy
 # =============================================================================
 # `make lite` (from repo root) → this Makefile's `all`: provisions PostgreSQL + MinIO + Redis
 # sidecar containers, pulls/builds the all-in-one image, runs it on the host network with the
@@ -16,11 +16,11 @@ CONTEXT    := $(ROOT)
 
 # --- DockerHub / image ---
 DOCKERHUB_USER ?= vexaai
-IMAGE_NAME     ?= vexa-lite
+IMAGE_NAME     ?= bot-service-lite
 TAG            ?= dev
 LOCAL_TAG      := $(IMAGE_NAME):$(TAG)
 PLATFORMS      ?= linux/amd64,linux/arm64
-BUILDER_NAME   ?= vexa-multiarch
+BUILDER_NAME   ?= bot-service-multiarch
 UNIQUE_TAG     := $(shell date +%y%m%d-%H%M)
 UNIQUE_DOCKERHUB_TAG := $(DOCKERHUB_USER)/$(IMAGE_NAME):$(UNIQUE_TAG)
 LAST_TAG_FILE  := $(ROOT)/deploy/lite/.last-tag
@@ -29,11 +29,11 @@ LAST_TAG_FILE  := $(ROOT)/deploy/lite/.last-tag
 # A user-defined bridge so the app's INTERNAL services live on the container's own loopback (no host
 # port collisions); only the front doors are published. postgres/minio join the same bridge and the
 # app reaches them by container name. Override HOST_*_PORT to avoid conflicts on a busy host.
-NETWORK         ?= vexa-lite-net
-PG_CONTAINER    ?= vexa-lite-postgres
-MINIO_CONTAINER ?= vexa-lite-minio
-REDIS_CONTAINER ?= vexa-lite-redis
-APP_CONTAINER   ?= vexa-lite
+NETWORK         ?= bot-service-lite-net
+PG_CONTAINER    ?= bot-service-lite-postgres
+MINIO_CONTAINER ?= bot-service-lite-minio
+REDIS_CONTAINER ?= bot-service-lite-redis
+APP_CONTAINER   ?= bot-service-lite
 HOST_GATEWAY_PORT   ?= 8056
 MINIO_ACCESS_KEY ?= vexa-access-key
 MINIO_SECRET_KEY ?= vexa-secret-key
@@ -47,7 +47,7 @@ MINIO_BUCKET     ?= vexa
 # OpenAI id); faster-whisper-server accepts it and serves WHISPER_MODEL. Override for a bigger
 # model (WHISPER_MODEL=Systran/faster-whisper-small.en) or a GPU image.
 LOCAL_STT        ?=
-WHISPER_CONTAINER ?= vexa-lite-whisper
+WHISPER_CONTAINER ?= bot-service-lite-whisper
 WHISPER_IMAGE    ?= fedirz/faster-whisper-server:latest-cpu
 WHISPER_MODEL    ?= Systran/faster-whisper-tiny.en
 HOST_STT_PORT    ?= 8083
@@ -58,7 +58,7 @@ define set_tag
 endef
 
 help:
-	@echo "Vexa Lite (meetings-only)"
+	@echo "Bot Service Lite (meetings-only)"
 	@echo "  make -C deploy/lite all     # provision + run + verify (this is `make lite` from root)"
 	@echo "  make -C deploy/lite down    # stop + remove app + sidecars"
 	@echo "  make -C deploy/lite build   # build the image locally (tagged :dev)"
@@ -68,7 +68,7 @@ help:
 # ── Deploy lifecycle ──────────────────────────────────────────────────────────────────────────────
 all: env preflight up init-db test
 	@HOST=$$(hostname -I 2>/dev/null | awk '{print $$1}'); HOST=$${HOST:-localhost}; \
-	echo ""; echo "Vexa Lite is running."; \
+	echo ""; echo "Bot Service Lite is running."; \
 	echo "  API docs:  http://$$HOST:$(HOST_GATEWAY_PORT)/docs"; \
 	echo "  API key:   docker logs $(APP_CONTAINER) | grep VEXA_API_KEY"
 
@@ -93,7 +93,7 @@ preflight:
 ##
 ## The recipe is ONE `\`-continued shell command: a bare `#` line inside it (no trailing `\`) ends
 ## the continuation, so make runs the rest in a SEPARATE shell where IMG/ADMIN_TK/… are already
-## lost — which once shipped `docker run … $IMG` with an EMPTY image (vexa-lite never created,
+## lost — which once shipped `docker run … $IMG` with an EMPTY image (bot-service-lite never created,
 ## every front door down). Keep all commentary OUT of the recipe body; annotate here instead.
 ##
 ## `envv` strips an INLINE COMMENT and trailing space from a .env value. `.env.example` once shipped
@@ -121,7 +121,7 @@ up: preflight
 		docker run -d --name $(PG_CONTAINER) --network $(NETWORK) --restart unless-stopped \
 			-e POSTGRES_DB=vexa -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres \
 			-e TZ=UTC -e PGTZ=UTC \
-			-v vexa-lite-pgdata:/var/lib/postgresql/data \
+			-v bot-service-lite-pgdata:/var/lib/postgresql/data \
 			postgres:17-alpine -c idle_in_transaction_session_timeout=60000 > /dev/null; \
 		for i in $$(seq 1 24); do docker exec $(PG_CONTAINER) pg_isready -U postgres -d vexa -q 2>/dev/null && break; sleep 2; done; \
 	fi; echo "  ✓ PostgreSQL ready"; \
@@ -130,7 +130,7 @@ up: preflight
 		docker rm -f $(MINIO_CONTAINER) 2>/dev/null || true; \
 		docker run -d --name $(MINIO_CONTAINER) --network $(NETWORK) --restart unless-stopped \
 			-e MINIO_ROOT_USER=$(MINIO_ACCESS_KEY) -e MINIO_ROOT_PASSWORD=$(MINIO_SECRET_KEY) \
-			-v vexa-lite-miniodata:/data \
+			-v bot-service-lite-miniodata:/data \
 			minio/minio:latest server /data --console-address ":9001" > /dev/null; \
 		sleep 4; \
 		docker run --rm --network $(NETWORK) --entrypoint sh minio/mc:latest -c \
@@ -140,7 +140,7 @@ up: preflight
 	if ! docker ps -q -f name=$(REDIS_CONTAINER) | grep -q .; then \
 		docker rm -f $(REDIS_CONTAINER) 2>/dev/null || true; \
 		docker run -d --name $(REDIS_CONTAINER) --network $(NETWORK) --restart unless-stopped \
-			-v vexa-lite-redisdata:/data \
+			-v bot-service-lite-redisdata:/data \
 			redis:7-alpine redis-server --appendonly yes --appendfsync everysec > /dev/null; \
 		for i in $$(seq 1 24); do docker exec $(REDIS_CONTAINER) redis-cli ping 2>/dev/null | grep -q PONG && break; sleep 2; done; \
 	fi; echo "  ✓ Redis ready"; \
@@ -158,7 +158,7 @@ up: preflight
 		TX_URL=http://$(WHISPER_CONTAINER):8000; TX_TOKEN=; \
 		echo "  ✓ local STT ready — routing transcription to $$TX_URL (model $(WHISPER_MODEL))"; \
 	fi; \
-	echo "Starting Vexa Lite ($$IMG)..."; \
+	echo "Starting Bot Service Lite ($$IMG)..."; \
 	docker rm -f $(APP_CONTAINER) 2>/dev/null || true; \
 	docker run -d --name $(APP_CONTAINER) --shm-size=2g --network $(NETWORK) --restart unless-stopped \
 		--env-file "$(ENV_FILE)" \
@@ -173,7 +173,7 @@ up: preflight
 		"$$IMG" > /dev/null; \
 	echo "  Waiting for the gateway (up to 3 min)..."; \
 	for i in $$(seq 1 36); do curl -sf -o /dev/null http://localhost:$(HOST_GATEWAY_PORT)/health 2>/dev/null && break; sleep 5; done; \
-	echo "  ✓ Vexa Lite running"
+	echo "  ✓ Bot Service Lite running"
 
 ## init-db — schema converges on each service's startup (admin/meeting ensure_schema); no-op hook.
 init-db:
@@ -185,9 +185,9 @@ test:
 		echo "  ✓ gateway (:$(HOST_GATEWAY_PORT))"; else echo "  ✗ gateway not responding (:$(HOST_GATEWAY_PORT))"; exit 1; fi
 
 ## down — stop + remove app + sidecars + network (volumes persist; `docker volume rm
-## vexa-lite-pgdata vexa-lite-miniodata vexa-lite-redisdata` to wipe).
+## bot-service-lite-pgdata bot-service-lite-miniodata bot-service-lite-redisdata` to wipe).
 down:
-	@echo "Stopping Vexa Lite..."
+	@echo "Stopping Bot Service Lite..."
 	@docker rm -f $(APP_CONTAINER) $(PG_CONTAINER) $(MINIO_CONTAINER) $(REDIS_CONTAINER) $(WHISPER_CONTAINER) 2>/dev/null || true
 	@docker network rm $(NETWORK) 2>/dev/null || true
 	@echo "  ✓ Stopped (data volumes kept)"
