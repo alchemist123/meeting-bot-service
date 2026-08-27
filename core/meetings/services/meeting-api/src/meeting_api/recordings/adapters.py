@@ -74,6 +74,106 @@ class S3Storage:
             return False
 
 
+class AzureBlobStorage:
+    """``Storage`` over an Azure Blob container (``azure-storage-blob``). Lazy client + a sync SDK
+    offloaded via ``_run`` (same shape as ``S3Storage`` — see its docstring for the G4 rationale);
+    kept as a second ``Storage`` implementation so ``STORAGE_BACKEND`` can select either at deploy
+    time with zero changes to ``service.py``/``router.py``."""
+
+    def __init__(self, *, container: str, connection_string: str):
+        self._container = container
+        self._connection_string = connection_string
+        self._client = None
+
+    def _c(self):
+        if self._client is None:
+            from azure.storage.blob import BlobServiceClient
+
+            service = BlobServiceClient.from_connection_string(self._connection_string)
+            self._client = service.get_container_client(self._container)
+        return self._client
+
+    async def _run(self, fn, *args, **kwargs):
+        """Run a BLOCKING azure-storage-blob call off the event loop — same reasoning as
+        ``S3Storage._run`` (G4): the SDK's sync client does blocking I/O."""
+        import asyncio
+
+        return await asyncio.to_thread(fn, *args, **kwargs)
+
+    async def upload(self, key: str, data: bytes, *, content_type: str) -> None:
+        from azure.storage.blob import ContentSettings
+
+        await self._run(
+            self._c().upload_blob, name=key, data=data, overwrite=True,
+            content_settings=ContentSettings(content_type=content_type),
+        )
+
+    async def list(self, prefix: str) -> list[str]:
+        def _list():
+            return sorted(b.name for b in self._c().list_blobs(name_starts_with=prefix))
+
+        return await self._run(_list)
+
+    async def get(self, key: str) -> bytes:
+        def _get():
+            return self._c().get_blob_client(key).download_blob().readall()
+
+        return await self._run(_get)
+
+    async def size(self, key: str) -> int:
+        def _size():
+            return self._c().get_blob_client(key).get_blob_properties().size
+
+        return await self._run(_size)
+
+    async def get_range(self, key: str, start: int, end: int) -> bytes:
+        # Azure's `length` is a byte COUNT from `offset` — unlike S3's inclusive Range header, so
+        # convert the inclusive [start, end] this Protocol method receives into offset/length.
+        def _get_range():
+            return (
+                self._c().get_blob_client(key)
+                .download_blob(offset=start, length=end - start + 1)
+                .readall()
+            )
+
+        return await self._run(_get_range)
+
+    async def exists(self, key: str) -> bool:
+        def _exists():
+            return self._c().get_blob_client(key).exists()
+
+        return await self._run(_exists)
+
+
+def _minio_endpoint_url() -> str:
+    """Build an http(s) MinIO URL from MINIO_ENDPOINT (host:port) + MINIO_SECURE, mirroring 0.11."""
+    endpoint = os.getenv("MINIO_ENDPOINT", "minio:9000")
+    if endpoint.startswith("http://") or endpoint.startswith("https://"):
+        return endpoint
+    scheme = "https" if os.getenv("MINIO_SECURE", "false").lower() == "true" else "http"
+    return f"{scheme}://{endpoint}"
+
+
+def build_storage_from_env() -> "S3Storage | AzureBlobStorage":
+    """Selects the recordings object-storage backend from ``STORAGE_BACKEND`` (default ``minio``) —
+    the ONE construction site both ``__main__.build_production_app`` and ``build_production_router``
+    call. Replaces two previously-hardcoded ``S3Storage(...)`` blocks that disagreed on default
+    bucket name and which env vars they honored; the MinIO branch here preserves the
+    ``build_production_app`` behavior exactly (its fallback chain is the one kept)."""
+    backend = os.getenv("STORAGE_BACKEND", "minio").strip().lower()
+    if backend in ("azure_blob", "azure"):
+        return AzureBlobStorage(
+            container=os.getenv("AZURE_STORAGE_CONTAINER", "vexa"),
+            connection_string=os.getenv("AZURE_STORAGE_CONNECTION_STRING", ""),
+        )
+    return S3Storage(
+        bucket=os.getenv("MINIO_BUCKET", os.getenv("RECORDING_BUCKET", "vexa")),
+        endpoint_url=os.getenv("S3_ENDPOINT") or _minio_endpoint_url(),
+        access_key=os.getenv("S3_ACCESS_KEY") or os.getenv("MINIO_ACCESS_KEY"),
+        secret_key=os.getenv("S3_SECRET_KEY") or os.getenv("MINIO_SECRET_KEY"),
+    )
+
+
 class SqlAlchemyRecordingRepo:
     """``RecordingRepo`` over a SQLAlchemy-async ``session_factory`` (``meetings`` /
     ``meeting_sessions``; recordings live in ``meetings.data`` JSONB)."""
@@ -175,10 +275,5 @@ def build_production_router(*, database_url: Optional[str] = None):
     )
     engine = build_engine(database_url)  # #635: env-steered pool
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
-    storage = S3Storage(
-        bucket=os.getenv("RECORDING_BUCKET", "recordings"),
-        endpoint_url=os.getenv("S3_ENDPOINT"),
-        access_key=os.getenv("S3_ACCESS_KEY"),
-        secret_key=os.getenv("S3_SECRET_KEY"),
-    )
+    storage = build_storage_from_env()
     return build_router(SqlAlchemyRecordingRepo(session_factory), storage)

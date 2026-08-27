@@ -212,6 +212,84 @@ async def test_s3_storage_does_not_block_the_event_loop():
     )
 
 
+# ── AzureBlobStorage: same G4 offload guarantee as S3Storage, plus backend selection ─────────────
+
+
+async def test_azure_blob_storage_does_not_block_the_event_loop():
+    """G4 (Azure variant): ``AzureBlobStorage._run`` must offload a blocking call via
+    ``asyncio.to_thread``, exactly like ``S3Storage._run`` above. Proven directly against ``_run``
+    (not through ``upload()``) so this test needs no ``azure-storage-blob`` install — the SDK is a
+    Dockerfile-only dependency (see the module docstring), never imported by ``_run`` itself."""
+    import asyncio
+    import time
+
+    from meeting_api.recordings.adapters import AzureBlobStorage
+
+    storage = AzureBlobStorage(container="c", connection_string="UseDevelopmentStorage=true")
+    calls = {"n": 0}
+
+    def _blocking_upload(**kw):
+        time.sleep(0.3)  # a real, blocking, synchronous call (what azure-storage-blob does)
+        calls["n"] += 1
+        return {}
+
+    ticks = {"n": 0}
+    stop = {"v": False}
+
+    async def heartbeat():
+        while not stop["v"]:
+            ticks["n"] += 1
+            await asyncio.sleep(0.005)
+
+    hb = asyncio.create_task(heartbeat())
+    try:
+        await storage._run(_blocking_upload, name="k")
+    finally:
+        stop["v"] = True
+        await hb
+
+    assert calls["n"] == 1
+    assert ticks["n"] >= 20, (
+        f"event loop appears BLOCKED (only {ticks['n']} heartbeats in ~0.3s) — "
+        "AzureBlobStorage._run is not offloading to a thread"
+    )
+
+
+def test_build_storage_from_env_defaults_to_minio(monkeypatch):
+    """No STORAGE_BACKEND (or STORAGE_BACKEND=minio) → S3Storage, built from the same
+    MINIO_*/S3_* fallback chain build_production_app always used."""
+    from meeting_api.recordings.adapters import S3Storage, build_storage_from_env
+
+    monkeypatch.delenv("STORAGE_BACKEND", raising=False)
+    monkeypatch.setenv("MINIO_BUCKET", "my-bucket")
+    monkeypatch.setenv("MINIO_ACCESS_KEY", "ak")
+    monkeypatch.setenv("MINIO_SECRET_KEY", "sk")
+    for k in ("S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY"):
+        monkeypatch.delenv(k, raising=False)
+
+    storage = build_storage_from_env()
+
+    assert isinstance(storage, S3Storage)
+    assert storage._bucket == "my-bucket"
+    assert storage._access_key == "ak"
+    assert storage._secret_key == "sk"
+
+
+def test_build_storage_from_env_selects_azure_blob(monkeypatch):
+    """STORAGE_BACKEND=azure_blob → AzureBlobStorage, built from AZURE_STORAGE_*."""
+    from meeting_api.recordings.adapters import AzureBlobStorage, build_storage_from_env
+
+    monkeypatch.setenv("STORAGE_BACKEND", "azure_blob")
+    monkeypatch.setenv("AZURE_STORAGE_CONTAINER", "my-container")
+    monkeypatch.setenv("AZURE_STORAGE_CONNECTION_STRING", "UseDevelopmentStorage=true")
+
+    storage = build_storage_from_env()
+
+    assert isinstance(storage, AzureBlobStorage)
+    assert storage._container == "my-container"
+    assert storage._connection_string == "UseDevelopmentStorage=true"
+
+
 # ── G3: concurrent chunk folds must not lose updates (atomic read→modify→write) ──────────────────
 
 

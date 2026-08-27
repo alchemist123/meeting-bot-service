@@ -99,6 +99,32 @@ def test_stt_tri_state():
     assert cp.capability_states(blank)["stt"] == cp.MISCONFIGURED
 
 
+def test_object_storage_tri_state_is_backend_aware():
+    # default backend (STORAGE_BACKEND unset) = MinIO: needs BOTH MINIO_ACCESS_KEY + MINIO_SECRET_KEY.
+    both = {"MINIO_ACCESS_KEY": "ak", "MINIO_SECRET_KEY": "sk"}
+    assert cp.capability_states(both)["object_storage"] == cp.CONFIGURED
+    assert cp.capability_states({})["object_storage"] == cp.NOT_CONFIGURED
+    key_only = {"MINIO_ACCESS_KEY": "ak"}
+    assert cp.capability_states(key_only)["object_storage"] == cp.MISCONFIGURED
+
+    # STORAGE_BACKEND=azure_blob: needs AZURE_STORAGE_CONNECTION_STRING instead — MinIO's keys are
+    # simply the wrong backend's keys now, never counted toward this verdict.
+    azure_configured = {
+        "STORAGE_BACKEND": "azure_blob",
+        "AZURE_STORAGE_CONNECTION_STRING": "UseDevelopmentStorage=true",
+    }
+    assert cp.capability_states(azure_configured)["object_storage"] == cp.CONFIGURED
+    azure_unconfigured = {"STORAGE_BACKEND": "azure_blob"}
+    assert cp.capability_states(azure_unconfigured)["object_storage"] == cp.NOT_CONFIGURED
+    # stale MinIO creds left over from a prior deploy must not make an azure_blob deploy look
+    # configured — only AZURE_STORAGE_CONNECTION_STRING counts once STORAGE_BACKEND=azure_blob.
+    azure_with_stale_minio = {
+        "STORAGE_BACKEND": "azure_blob",
+        "MINIO_ACCESS_KEY": "ak", "MINIO_SECRET_KEY": "sk",
+    }
+    assert cp.capability_states(azure_with_stale_minio)["object_storage"] == cp.NOT_CONFIGURED
+
+
 def test_unknown_capability_fails_loud():
     with pytest.raises(cp.ConfigError):
         cp.capability_state("no_such_capability", {})

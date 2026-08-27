@@ -91,6 +91,15 @@ def capability_states(env: Optional[Mapping[str, str]] = None) -> dict:
     states = {}
     for name, cap in caps.items():
         keys = keys_by_cap.get(name) or []
+        if name == "object_storage":
+            # STORAGE_BACKEND picks which backend's credentials are the actual requirement — the
+            # declared object_storage keys span BOTH MinIO's and Azure Blob's, but only one
+            # backend's keys are ever expected to be set at once (mode "all" over both would
+            # otherwise demand MinIO creds even when STORAGE_BACKEND=azure_blob, and vice versa).
+            backend = (env.get("STORAGE_BACKEND") or "minio").strip().lower()
+            is_azure = backend in ("azure_blob", "azure")
+            azure_keys = {"AZURE_STORAGE_CONNECTION_STRING"}
+            keys = [k for k in keys if (k in azure_keys) == is_azure]
         present = [k for k in keys if _is_set(env, k)]
         if (cap.get("mode") or "all") == "any":
             states[name] = CONFIGURED if present else NOT_CONFIGURED

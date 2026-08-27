@@ -1,0 +1,119 @@
+<mxfile host="65bd71144e">
+    <diagram id="bot-service-flow" name="Bot Service Flow">
+        <mxGraphModel dx="655" dy="378" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1000" background="none" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="client" value="External API client (X-API-Key)&#10;e.g. NoteTaker — see combined-flow.drawio" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;dashed=1;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="40" width="260" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="gateway" value="Gateway  :8056&#10;edge_guard (rate-limit/auto-ban) · auth · routing · /ws fan-out" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="1" vertex="1">
+                    <mxGeometry x="360" y="40" width="280" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="admin" value="admin-api  :8001&#10;identity: users · API keys&#10;/internal/validate · /internal/users/{id}/bot-context&#10;/internal/calendar-configs" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="1" vertex="1">
+                    <mxGeometry x="700" y="30" width="280" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="meeting" value="&lt;font color=&quot;#330000&quot;&gt;meeting-api  :8080&lt;br&gt;bot_spawn · lifecycle FSM · transcript collector&lt;br&gt;recordings · webhooks · calendar auto-join sweep&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="1" vertex="1">
+                    <mxGeometry x="360" y="170" width="320" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="runtime" value="&lt;font color=&quot;#330000&quot;&gt;runtime  :8090&lt;br&gt;runtime_kernel — profile registry, POST /workloads&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="1" vertex="1">
+                    <mxGeometry x="360" y="300" width="320" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="be_process" value="&lt;font color=&quot;#330000&quot;&gt;process backend&lt;br&gt;subprocess.Popen — shared host, POSIX uid/gid only&lt;br&gt;deploy/lite  ·  RUNTIME_BACKEND=process&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="410" width="280" height="75" as="geometry"/>
+                </mxCell>
+                <mxCell id="be_docker" value="&lt;font color=&quot;#330000&quot;&gt;docker backend&lt;br&gt;POST /containers/create via docker.sock&lt;br&gt;sets NetworkMode + ShmSize only — NO cpu/mem limit&lt;br&gt;deploy/compose  ·  RUNTIME_BACKEND=docker&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" parent="1" vertex="1">
+                    <mxGeometry x="340" y="410" width="320" height="85" as="geometry"/>
+                </mxCell>
+                <mxCell id="be_k8s" value="&lt;font color=&quot;#330000&quot;&gt;k8s backend&lt;br&gt;kubectl run --restart=Never (bare Pod)&lt;br&gt;volumes/tolerations only — NO resources.requests/limits&lt;br&gt;RUNTIME_BACKEND=k8s&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" parent="1" vertex="1">
+                    <mxGeometry x="680" y="410" width="320" height="85" as="geometry"/>
+                </mxCell>
+                <mxCell id="bot" value="&lt;font color=&quot;#330000&quot;&gt;Bot (Playwright)&lt;br&gt;@vexa/join → capture (gmeet/teams/zoom/jitsi) → recording&lt;br&gt;one bot per meeting; optional live STT stream&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="1" vertex="1">
+                    <mxGeometry x="380" y="540" width="340" height="75" as="geometry"/>
+                </mxCell>
+                <mxCell id="stt" value="&lt;span style=&quot;background-color: rgb(51, 0, 0);&quot;&gt;Transcription service (optional, external)&lt;br&gt;OpenAI-audio-compatible /v1/audio/transcriptions&lt;br&gt;deploy/transcription (GPU/CPU) or a hosted token&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;dashed=1;" parent="1" vertex="1">
+                    <mxGeometry x="820" y="540" width="300" height="75" as="geometry"/>
+                </mxCell>
+                <mxCell id="postgres" value="&lt;font color=&quot;#330000&quot;&gt;Postgres&lt;br&gt;users · api_keys · meetings · transcript_segments&lt;br&gt;recordings · webhooks · calendar_configs&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;" parent="1" vertex="1">
+                    <mxGeometry x="60" y="680" width="300" height="65" as="geometry"/>
+                </mxCell>
+                <mxCell id="redis" value="&lt;font color=&quot;#330000&quot;&gt;Redis&lt;br&gt;pub/sub lifecycle+transcript · auto-join scheduler&lt;br&gt;edge_guard rate-limit/ban state&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;" parent="1" vertex="1">
+                    <mxGeometry x="400" y="680" width="280" height="65" as="geometry"/>
+                </mxCell>
+                <mxCell id="minio" value="&lt;font color=&quot;#330000&quot;&gt;MinIO&lt;br&gt;recordings — chunks → finalized master&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;" parent="1" vertex="1">
+                    <mxGeometry x="720" y="680" width="240" height="65" as="geometry"/>
+                </mxCell>
+                <mxCell id="e1" value="POST /bots · GET /meetings · GET /recordings · GET /transcripts · DELETE /bots  (X-API-Key)" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;" parent="1" source="client" target="gateway" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e2" value="POST /internal/validate → user_id, scopes" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;" parent="1" source="gateway" target="admin" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e3" value="proxied request (post-auth)" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;" parent="1" source="gateway" target="meeting" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e4" value="/ws — live transcript, bot-status, chat (fan-out)" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;" parent="1" source="gateway" target="client" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e5" value="GET /internal/users/{id}/bot-context · /internal/calendar-configs" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;" parent="1" source="meeting" target="admin" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e6" value="POST /workloads (meeting-bot profile spec)" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;" parent="1" source="meeting" target="runtime" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e7" value="RUNTIME_BACKEND=process" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;" parent="1" source="runtime" target="be_process" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e8" value="RUNTIME_BACKEND=docker" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;" parent="1" source="runtime" target="be_docker" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e9" value="RUNTIME_BACKEND=k8s" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;" parent="1" source="runtime" target="be_k8s" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e10" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;" parent="1" source="be_process" target="bot" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e11" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;" parent="1" source="be_docker" target="bot" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e12" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;" parent="1" source="be_k8s" target="bot" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e13" value="lifecycle callback + transcript segments + recording chunks" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;" parent="1" source="bot" target="meeting" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e14" value="stream audio (only if TRANSCRIBE_ENABLED)" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;" parent="1" source="bot" target="stt" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e15" value="upload / finalize recording" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;" parent="1" source="meeting" target="minio" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e16" value="meetings, transcript_segments, recordings, webhooks" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;" parent="1" source="meeting" target="postgres" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e17" value="users, api_keys" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;" parent="1" source="admin" target="postgres" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e18" value="pub/sub + auto-join scheduler" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;" parent="1" source="meeting" target="redis" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e19" value="rate-limit/ban state; /ws subscribe" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;" parent="1" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <mxPoint x="500.0026315789473" y="100" as="sourcePoint"/>
+                        <mxPoint x="540.0026315789473" y="670" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="2" value="Text" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontColor=#330000;" vertex="1" connectable="0" parent="e19">
+                    <mxGeometry x="0.6355" y="2" relative="1" as="geometry">
+                        <mxPoint x="-2" y="-9" as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="3" value="Text" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontColor=#330000;" vertex="1" connectable="0" parent="e19">
+                    <mxGeometry x="-0.0909" y="-1" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+</mxfile>

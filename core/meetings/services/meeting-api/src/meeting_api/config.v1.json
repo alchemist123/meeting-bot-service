@@ -193,8 +193,32 @@
    "key": "STORAGE_BACKEND",
    "class": "defaulted",
    "default": "minio",
-   "description": "storage-backend label stamped into the recording's meeting.data JSONB",
-   "targets": []
+   "description": "selects the recordings object-storage backend: \"minio\" (S3/MinIO, MINIO_*/S3_* keys) or \"azure_blob\" (AZURE_STORAGE_* keys). Also stamped into the recording's meeting.data JSONB.",
+   "targets": [
+    "compose",
+    "lite"
+   ]
+  },
+  {
+   "key": "AZURE_STORAGE_CONNECTION_STRING",
+   "class": "capability",
+   "capability": "object_storage",
+   "secret": true,
+   "description": "Azure Blob connection string (endpoint + auth in one value) — required when STORAGE_BACKEND=azure_blob",
+   "targets": [
+    "compose",
+    "lite"
+   ]
+  },
+  {
+   "key": "AZURE_STORAGE_CONTAINER",
+   "class": "defaulted",
+   "default": "vexa",
+   "description": "Azure Blob container recordings are written to — used when STORAGE_BACKEND=azure_blob",
+   "targets": [
+    "compose",
+    "lite"
+   ]
   },
   {
    "key": "MEETING_TOKEN_TTL_SECONDS",

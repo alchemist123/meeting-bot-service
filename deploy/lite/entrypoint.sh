@@ -58,6 +58,13 @@ export MINIO_SECRET_KEY="${MINIO_SECRET_KEY:-}"
 export MINIO_BUCKET="${MINIO_BUCKET:-vexa}"
 export MINIO_SECURE="${MINIO_SECURE:-false}"
 
+# Recordings object-storage backend: "minio" (default, the MINIO_* vars above) or "azure_blob"
+# (AZURE_STORAGE_CONNECTION_STRING + AZURE_STORAGE_CONTAINER below) — see meeting_api.recordings
+# .adapters.build_storage_from_env. Switching requires a container restart.
+export STORAGE_BACKEND="${STORAGE_BACKEND:-minio}"
+export AZURE_STORAGE_CONNECTION_STRING="${AZURE_STORAGE_CONNECTION_STRING:-}"
+export AZURE_STORAGE_CONTAINER="${AZURE_STORAGE_CONTAINER:-vexa}"
+
 # Gateway edge guard (fastapi-guard): ON by default with generous limits (owner ruling).
 # Opt out with -e GUARD_ENABLED=false on the container. Other GUARD_* tuning keys
 # (GUARD_RATE_LIMIT_RPM, GUARD_TRUSTED_PROXIES, …) flow through container env untouched.
