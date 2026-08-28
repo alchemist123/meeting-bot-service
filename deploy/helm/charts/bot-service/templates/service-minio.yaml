@@ -1,0 +1,25 @@
+{{- if .Values.minio.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "bot-service.componentName" (list . "minio") }}
+  labels:
+    {{- include "bot-service.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.minio.service.type }}
+  ports:
+    - name: api
+      port: {{ .Values.minio.service.port }}
+      targetPort: api
+      {{- if and (eq .Values.minio.service.type "NodePort") .Values.minio.service.nodePort }}
+      # NodePort makes MinIO browser-reachable for presigned-URL audio/recording fetches. Fixed
+      # nodePort so MINIO_PUBLIC_ENDPOINT can reference it deterministically.
+      nodePort: {{ .Values.minio.service.nodePort }}
+      {{- end }}
+    - name: console
+      port: 9001
+      targetPort: console
+  selector:
+    {{- include "bot-service.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: minio
+{{- end }}

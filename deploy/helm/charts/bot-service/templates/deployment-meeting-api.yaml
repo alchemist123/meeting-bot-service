@@ -1,0 +1,176 @@
+{{- if .Values.meetingApi.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "bot-service.componentName" (list . "meeting-api") }}
+  labels:
+    {{- include "bot-service.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.meetingApi.replicaCount }}
+  {{- include "bot-service.deploymentStrategy" . | nindent 2 }}
+  selector:
+    matchLabels:
+      {{- include "bot-service.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: meeting-api
+  template:
+    metadata:
+      labels:
+        {{- include "bot-service.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: meeting-api
+      annotations:
+        {{- toYaml .Values.global.podAnnotations | nindent 8 }}
+    spec:
+      securityContext:
+        {{- toYaml .Values.global.podSecurityContext | nindent 8 }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: meeting-api
+          securityContext:
+            {{- toYaml .Values.global.securityContext | nindent 12 }}
+          image: "{{ .Values.meetingApi.image.repository }}:{{ .Values.global.imageTag | default .Values.meetingApi.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: DB_HOST
+              value: {{ include "bot-service.dbHost" . | quote }}
+            - name: DB_PORT
+              value: {{ .Values.database.port | quote }}
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "bot-service.postgresCredentialsSecretName" . | quote }}
+                  key: POSTGRES_DB
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "bot-service.postgresCredentialsSecretName" . | quote }}
+                  key: POSTGRES_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "bot-service.postgresCredentialsSecretName" . | quote }}
+                  key: POSTGRES_PASSWORD
+            - name: REDIS_URL
+              value: {{ include "bot-service.redisUrl" . | quote }}
+            - name: RUNTIME_API_URL
+              value: "http://{{ include "bot-service.componentName" (list . "runtime") }}:{{ .Values.runtime.service.port }}"
+            # Background sweeps' internal lookups: auto-join fetches per-user spawn context and
+            # calendar sync discovers connected ICS feeds. Unset -> calendar sync no-ops, auto-join
+            # spawns uncapped.
+            - name: ADMIN_API_URL
+              value: "http://{{ include "bot-service.componentName" (list . "admin-api") }}:{{ .Values.adminApi.service.port }}"
+            - name: INTERNAL_API_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "bot-service.adminTokenSecretName" . }}
+                  key: INTERNAL_API_SECRET
+            # MeetingToken is signed AND verified with the SAME admin secret admin-api holds.
+            - name: ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "bot-service.adminTokenSecretName" . }}
+                  key: ADMIN_API_TOKEN
+            - name: TRANSCRIPTION_SERVICE_URL
+              value: {{ .Values.meetingApi.transcriptionServiceUrl | default "" | quote }}
+            - name: TRANSCRIPTION_SERVICE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "bot-service.adminTokenSecretName" . }}
+                  key: TRANSCRIPTION_SERVICE_TOKEN
+            # Deployment-level defaults for a spawn's transcribe/recording flags when the request
+            # does not say (config.v1 `defaulted` keys). TRANSCRIBE_ENABLED=false makes a no-STT
+            # deployment spawn capture-only bots instead of 503-ing every default POST /bots.
+            - name: TRANSCRIBE_ENABLED
+              value: {{ .Values.meetingApi.transcribeEnabled | default "true" | quote }}
+            - name: RECORDING_ENABLED
+              value: {{ .Values.meetingApi.recordingEnabled | default "true" | quote }}
+            # Self-hosted Jitsi hostnames (comma-separated) recognized in pasted + calendar links.
+            - name: VEXA_JITSI_HOSTS
+              value: {{ .Values.meetingApi.jitsiHosts | default "" | quote }}
+            {{- if .Values.minio.enabled }}
+            - name: MINIO_ENDPOINT
+              value: "{{ include "bot-service.componentName" (list . "minio") }}:{{ .Values.minio.service.port }}"
+            - name: MINIO_ACCESS_KEY
+              value: {{ .Values.minio.accessKey | quote }}
+            - name: MINIO_SECRET_KEY
+              value: {{ .Values.minio.secretKey | quote }}
+            - name: MINIO_BUCKET
+              value: {{ .Values.minio.bucket | quote }}
+            {{- end }}
+            - name: MINIO_SECURE
+              value: {{ .Values.meetingApi.minioSecure | default "false" | quote }}
+            # Recordings object-storage backend: "minio" (default, the MINIO_* vars above) or
+            # "azure_blob" (the two vars below). Switching requires a restart of this service.
+            - name: STORAGE_BACKEND
+              value: {{ .Values.meetingApi.storageBackend | default "minio" | quote }}
+            - name: AZURE_STORAGE_CONNECTION_STRING
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "bot-service.adminTokenSecretName" . }}
+                  key: AZURE_STORAGE_CONNECTION_STRING
+                  optional: true
+            - name: AZURE_STORAGE_CONTAINER
+              value: {{ .Values.meetingApi.azureStorageContainer | default "vexa" | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.meetingApi.logLevel | default "info" | quote }}
+            # Authenticated-bot mode (deployment-scoped) — docs: /authenticated-bots.
+            - name: BOT_AUTHENTICATED
+              value: {{ .Values.meetingApi.botAuthenticated | default "false" | quote }}
+            - name: BOT_USERDATA_S3_PATH
+              value: {{ .Values.meetingApi.botUserdataS3Path | default "" | quote }}
+            - name: BOT_S3_ENDPOINT
+              value: {{ .Values.meetingApi.botS3Endpoint | default "" | quote }}
+            - name: BOT_S3_BUCKET
+              value: {{ .Values.meetingApi.botS3Bucket | default "" | quote }}
+            - name: BOT_S3_ACCESS_KEY
+              value: {{ .Values.meetingApi.botS3AccessKey | default "" | quote }}
+            - name: BOT_S3_SECRET_KEY
+              value: {{ .Values.meetingApi.botS3SecretKey | default "" | quote }}
+            {{- with .Values.meetingApi.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 40
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 45
+            periodSeconds: 20
+            timeoutSeconds: 5
+          resources:
+            {{- toYaml .Values.meetingApi.resources | nindent 12 }}
+      {{- with .Values.global.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with (include "bot-service.topologySpreadConstraints" (list . .Values.meetingApi "meeting-api")) }}
+      {{- . | nindent 6 }}
+      {{- end }}
+{{- end }}

@@ -1,0 +1,300 @@
+# Default values for the Bot Service Lite (meetings-only Vexa fork) Helm chart.
+#
+# This carves the control plane = 4 long-running services (gateway · admin-api · meeting-api ·
+# runtime) + infra (postgres · redis · minio + a minio-init bucket Job). The runtime spawns the
+# bot ON DEMAND (it is NOT a service here): with runtime.backend=k8s it launches it as a Pod under
+# its ServiceAccount/RBAC; with backend=docker (compose/desktop) via the host docker socket.
+# Images are the compose `bot-service-lite/*` repos (see ../compose/docker-compose.yml).
+#
+# There is no agent/copilot domain and no web UI in this fork (see repo README) — this chart is
+# intentionally smaller than the upstream Vexa chart: no agent-api, no terminal, no dashboard, no
+# pgbouncer. The gateway is the sole front door.
+#
+# Production overrides: set `global.imageTag` to a pinned tag, fill `secrets`, and point
+# `database`/`redisConfig` at managed infra (postgres.enabled=false / redis.enabled=false).
+
+global:
+  imageTag: ""              # When set, overrides every service image tag (build-once promotion).
+  imagePullPolicy: Always
+  imagePullSecrets: []
+  clusterDomain: cluster.local
+
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  # Pod topology spread — applied to EVERY component Deployment (gateway, admin-api, meeting-api,
+  # runtime). Empty by default → nothing rendered (single-node / k3s installs keep working
+  # unchanged). Each constraint you add here is stamped onto every component; when a constraint
+  # omits `labelSelector`, the chart injects THAT component's own pod selector (name + instance +
+  # component), so the constraint means "spread this component's replicas". A per-component
+  # `<component>.topologySpreadConstraints` overrides this global default for that one component.
+  # Use ScheduleAnyway (not DoNotSchedule) so a full/small cluster still schedules.
+  # Example — spread each component's replicas one-per-node, best-effort:
+  #   topologySpreadConstraints:
+  #     - maxSkew: 1
+  #       topologyKey: kubernetes.io/hostname
+  #       whenUnsatisfiable: ScheduleAnyway
+  topologySpreadConstraints: []
+  podSecurityContext: {}
+  # Hardened defaults: block privilege escalation, drop all caps. Images run non-root via their
+  # Dockerfile USER. Override per-component only if a workload genuinely needs a cap back.
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+
+# ---------- Shared secrets ----------
+# Recommended: override via --set-file / external secret tooling, or point existingSecretName at a
+# Secret carrying these keys: ADMIN_API_TOKEN, INTERNAL_API_SECRET, TRANSCRIPTION_SERVICE_TOKEN.
+secrets:
+  existingSecretName: ""
+  adminApiToken: "CHANGE_ME"        # admin-api auth + MeetingToken signing (== meeting-api ADMIN_TOKEN)
+  internalApiSecret: ""             # gateway<->admin-api<->meeting-api internal calls (default vexa-internal-secret)
+  transcriptionServiceToken: ""     # funded STT token threaded into spawned bots
+  azureStorageConnectionString: ""  # only used when meetingApi.storageBackend=azure_blob
+
+# ---------- Shared backing config ----------
+database:
+  host: ""          # auto-filled when postgres.enabled=true, else REQUIRED
+  port: 5432
+  name: "vexa"
+  user: "postgres"
+  password: "postgres"
+  sslMode: "disable"
+
+redisConfig:
+  url: ""           # auto-filled when redis.enabled=true, else REQUIRED
+  host: ""
+  port: 6379
+
+# ============ Components ============
+
+# The HTTP front door (compose: gateway → :8000).
+gateway:
+  enabled: true
+  replicaCount: 2
+  image:
+    repository: bot-service-lite/gateway
+    tag: dev
+  service:
+    type: ClusterIP
+    port: 8000
+    nodePort: ""
+  logLevel: "info"
+  # fastapi-guard edge layer: per-IP throttle + auto-ban at the gateway edge.
+  # ON by default with generous limits (600 req/min per IP); set enabled: false to opt out.
+  guard:
+    enabled: true
+    wsEnabled: false          # optional /ws connect guard (in-memory, per-process; opt-in)
+    enableRedis: true         # reuse REDIS_URL for guard state (vexa:guard: namespace)
+    rateLimitRpm: 600         # per-IP requests per minute (0 disables rate limiting)
+    rateLimitWindow: 60
+    autoBanThreshold: 10
+    autoBanDuration: 3600
+    ipWhitelist: ""           # comma-separated IPs that bypass the guard
+    ipBlacklist: ""           # comma-separated IPs to block (403)
+    trustedProxies: ""        # comma-separated trusted proxy IPs (enables X-Forwarded-For)
+    trustXForwardedProto: false
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits:   { cpu: 500m, memory: 512Mi }
+  extraEnv: []
+  # Per-component override of global.topologySpreadConstraints (same shape). Omit `labelSelector`
+  # and the gateway's own pod selector is injected — spread gateway replicas across nodes:
+  #   topologySpreadConstraints:
+  #     - maxSkew: 1
+  #       topologyKey: kubernetes.io/hostname
+  #       whenUnsatisfiable: ScheduleAnyway
+
+# Identity / tokens (compose: admin-api → :8001).
+adminApi:
+  enabled: true
+  replicaCount: 2
+  image:
+    repository: bot-service-lite/admin-api
+    tag: dev
+  service:
+    type: ClusterIP
+    port: 8001
+  logLevel: "info"
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits:   { cpu: 500m, memory: 512Mi }
+  extraEnv: []
+
+# Meetings + recordings (compose: meeting-api → :8080).
+meetingApi:
+  enabled: true
+  replicaCount: 2
+  image:
+    repository: bot-service-lite/meeting-api
+    tag: dev
+  service:
+    type: ClusterIP
+    port: 8080
+  transcriptionServiceUrl: ""   # STT endpoint the spawned bot transcribes against (empty ⇒ capture only)
+  # Deployment-level defaults for a spawn's transcribe/recording flags when the request does not
+  # say (config.v1 `defaulted` keys). transcribeEnabled=false makes a no-STT deployment spawn
+  # capture-only bots instead of 503-ing every default POST /bots.
+  transcribeEnabled: "true"
+  recordingEnabled: "true"
+  jitsiHosts: ""              # comma-separated self-hosted Jitsi hostnames recognized in links
+  # Authenticated-bot mode (deployment-scoped; docs: /authenticated-bots): botAuthenticated "true"
+  # makes every spawned bot restore the provisioned browser session and join signed-in. The BOT_S3
+  # values are SCOPED userdata-store credentials, never the deployment's admin S3 creds.
+  botAuthenticated: "false"
+  botUserdataS3Path: ""
+  botS3Endpoint: ""
+  botS3Bucket: ""
+  botS3AccessKey: ""
+  botS3SecretKey: ""
+  minioSecure: "false"
+  # Recordings object-storage backend: "minio" (default, the minio.* values below) or "azure_blob"
+  # (secrets.azureStorageConnectionString + azureStorageContainer). Switching requires a restart.
+  storageBackend: "minio"
+  azureStorageContainer: "vexa"
+  logLevel: "info"
+  resources:
+    requests: { cpu: 200m, memory: 512Mi }
+    limits:   { cpu: 1000m, memory: 1Gi }
+  extraEnv: []
+  # Per-component override of global.topologySpreadConstraints (same shape). Omit `labelSelector`
+  # and the meeting-api's own pod selector is injected. See global.topologySpreadConstraints.
+  # topologySpreadConstraints: []
+
+# Runtime kernel — spawns the bot workload (compose: runtime → :8090).
+runtime:
+  enabled: true
+  # backend selects the spawn substrate (runtime_kernel/__main__.py:_build_backend):
+  #   k8s    → Pods via kubectl under the runtime SA/RBAC (this chart's RBAC). The real cloud path.
+  #   docker → host /var/run/docker.sock (single-node k3s fallback; mounts the socket — see below).
+  #   process→ child processes (no containers).
+  backend: "k8s"
+  replicaCount: 1               # keep at 1 unless backend=k8s (Redis is the state-of-record)
+  image:
+    repository: bot-service-lite/runtime
+    tag: dev
+  service:
+    type: ClusterIP
+    port: 8090
+  # The bot image the runtime spawns (published separately; built locally with `make bot` for
+  # compose). Empty → follows global.imageTag (fallback bot-service-lite/bot-service-bot:dev).
+  browserImage: ""
+  logLevel: "info"
+  speakerStream:
+    minAudioSec: ""
+    submitIntervalSec: ""
+    confirmThreshold: ""
+    maxBufferSec: ""
+    idleTimeoutSec: ""
+  # Active-phase remote-audio silence window. Empty uses the bot's 10-minute default.
+  aloneSilenceWindowMs: ""
+  resources:
+    requests: { cpu: 50m, memory: 256Mi }
+    limits:   { cpu: 500m, memory: 768Mi }
+  # Per-component override of global.topologySpreadConstraints (same shape). Applies to the runtime
+  # Deployment's OWN pods (not the bot Pods it spawns — those carry runtime.tolerations/
+  # nodeSelector via the RUNTIME_K8S_* env below). Omit `labelSelector` and the runtime's own pod
+  # selector is injected. See global.topologySpreadConstraints.
+  # topologySpreadConstraints: []
+  # Scheduling for the Pods the runtime SPAWNS (backend=k8s). A `kubectl run` bot Pod is NOT a
+  # child of the runtime Deployment, so it does NOT inherit global.nodeSelector/global.tolerations —
+  # on an all-tainted pool (dedicated / spot node pools) every spawn strands Pending and the meeting
+  # silently fails. By DEFAULT (leave these unset) spawned Pods inherit the runtime's own
+  # constraints — global.tolerations / global.nodeSelector — so they schedule wherever the runtime
+  # itself can, with zero operator action. Set these ONLY to send spawned bots to a DIFFERENT pool
+  # than the kernel: they are passed to the backend as RUNTIME_K8S_TOLERATIONS /
+  # RUNTIME_K8S_NODE_SELECTOR (JSON) and stamped onto every spawned Pod's spec.
+  # tolerations: []            # override global.tolerations for spawned Pods (list of toleration objects)
+  # nodeSelector: {}           # override global.nodeSelector for spawned Pods (node-label map)
+  extraEnv: []
+
+# ---------- Optional bundled dependencies ----------
+
+postgres:
+  enabled: true
+  image: postgres:17-alpine
+  credentialsSecretName: postgres-credentials
+  idleInTransactionTimeoutMs: 60000
+  service:
+    port: 5432
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClassName: ""
+  resources:
+    requests: { cpu: 200m, memory: 512Mi }
+    limits:   { cpu: 4000m, memory: 4Gi }
+
+redis:
+  enabled: true
+  image: redis:7-alpine
+  service:
+    port: 6379
+  persistence:
+    enabled: true
+    size: 2Gi
+    storageClassName: ""
+  maxmemory: "1gb"
+  maxmemoryPolicy: "allkeys-lru"
+  # Durability paired invariant (enforced by bot-service.validateRedisDurability): AOF on ⇒ BGSAVE failures
+  # are non-blocking. Don't set stopWritesOnBgsaveError=yes without appendonly=yes.
+  durability:
+    appendonly: "yes"
+    appendfsync: "everysec"
+    stopWritesOnBgsaveError: "no"
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits:   { cpu: 1000m, memory: 1Gi }
+
+minio:
+  enabled: true
+  image:
+    repository: minio/minio
+    tag: latest
+  accessKey: vexa-access-key
+  secretKey: vexa-secret-key
+  bucket: vexa
+  persistence:
+    size: 10Gi
+    storageClassName: ""
+  service:
+    # ClusterIP keeps MinIO internal (prod fronts it via ingress/presigned URLs proxied through
+    # meeting-api). Switch to NodePort on dev/k3s to reach presigned download URLs browser-side.
+    type: ClusterIP
+    port: 9000
+    nodePort: ""
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits:   { cpu: 500m, memory: 1Gi }
+
+# ---------- Ingress (optional; fronts the gateway — the sole HTTP front door in this fork) ----------
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: "bot-service.local"
+  tls: []
+  paths:
+    - path: /
+      pathType: Prefix
+      service: gateway
+      servicePort: 8000
+
+# ---------- PodDisruptionBudgets (optional) ----------
+# Stateless services default on (paired with replicaCount 2). Keys are the component value keys;
+# kebabcase maps to the component label (e.g. adminApi → admin-api). State-bearing infra stays off.
+podDisruptionBudgets:
+  gateway:
+    enabled: true
+    minAvailable: 1
+  adminApi:
+    enabled: true
+    minAvailable: 1
+  meetingApi:
+    enabled: true
+    minAvailable: 1
+  runtime:
+    enabled: false        # default replicaCount 1; only enable with backend=k8s + replicas>1
+    minAvailable: 1

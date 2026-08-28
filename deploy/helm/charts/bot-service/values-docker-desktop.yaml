@@ -1,0 +1,67 @@
+# Overlay for Docker Desktop's built-in single-node Kubernetes (context "docker-desktop").
+#
+# Docker Desktop's cluster shares the SAME image store as `docker build` on your host — so
+# `imagePullPolicy: Never` here is a deliberate guardrail: it makes the chart refuse to reach a
+# registry and fail loud (ImagePullBackOff) if you forgot to build an image, instead of silently
+# hanging trying to pull a `bot-service-lite/*` repo that doesn't exist anywhere remote.
+#
+#   helm install bot-service deploy/helm/charts/bot-service -n bot-service --create-namespace -f values-docker-desktop.yaml \
+#     --kube-context docker-desktop
+#
+# See ../../DOCKER-DESKTOP.md for the full walkthrough (build images, install, verify, teardown).
+
+global:
+  imagePullPolicy: Never
+
+secrets:
+  adminApiToken: "dev-admin-token"
+  internalApiSecret: "vexa-internal-secret"
+  transcriptionServiceToken: ""
+
+gateway:
+  replicaCount: 1
+  service:
+    type: NodePort
+    nodePort: 30056        # -> http://localhost:30056 (Docker Desktop forwards NodePorts to the host)
+
+adminApi:
+  replicaCount: 1
+
+meetingApi:
+  replicaCount: 1
+
+runtime:
+  replicaCount: 1
+  backend: "k8s"          # spawns the bot as a Pod via the runtime's ServiceAccount/RBAC
+  browserImage: "bot-service-lite/bot-service-bot:dev"   # matches `make compose-bot`'s output tag
+
+postgres:
+  persistence:
+    size: 2Gi
+    # Docker Desktop ships a default StorageClass ("hostpath"/"docker-desktop") — leave
+    # storageClassName unset (chart default) to use it; PVCs bind immediately.
+
+redis:
+  persistence:
+    size: 1Gi
+
+minio:
+  service:
+    type: NodePort
+    nodePort: 30900       # -> http://localhost:30900
+  persistence:
+    size: 2Gi
+
+ingress:
+  enabled: false          # no ingress controller on a stock Docker Desktop cluster; use NodePort
+
+# Single replica, single node ⇒ no PDBs (they would block the node from ever draining).
+podDisruptionBudgets:
+  gateway:
+    enabled: false
+  adminApi:
+    enabled: false
+  meetingApi:
+    enabled: false
+  runtime:
+    enabled: false

@@ -1,0 +1,99 @@
+{{- if .Values.redis.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "bot-service.componentName" (list . "redis") }}
+  labels:
+    {{- include "bot-service.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  # Redis uses Recreate (not the default RollingUpdate) because a single PVC
+  # cannot be mounted by two pods; a maxSurge > 0 rollout would stall.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "bot-service.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: redis
+  template:
+    metadata:
+      labels:
+        {{- include "bot-service.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: redis
+    spec:
+      # Stateful-pod anti-affinity: spread redis/postgres/minio across nodes on a multi-node
+      # cluster so losing one node doesn't strand every stateful pod's PVC on it at once.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app.kubernetes.io/component
+                      operator: In
+                      values: [postgres, minio]
+                topologyKey: kubernetes.io/hostname
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: redis
+          image: "{{ .Values.redis.image }}"
+          imagePullPolicy: IfNotPresent
+          {{- include "bot-service.validateRedisDurability" . }}
+          args:
+            - "--appendonly"
+            - {{ .Values.redis.durability.appendonly | default "yes" | quote }}
+            - "--appendfsync"
+            - {{ .Values.redis.durability.appendfsync | default "everysec" | quote }}
+            - "--stop-writes-on-bgsave-error"
+            - {{ .Values.redis.durability.stopWritesOnBgsaveError | default "no" | quote }}
+            {{- with .Values.redis.maxmemory }}
+            - "--maxmemory"
+            - {{ . | quote }}
+            {{- end }}
+            {{- with .Values.redis.maxmemoryPolicy }}
+            - "--maxmemory-policy"
+            - {{ . | quote }}
+            {{- end }}
+          ports:
+            - name: redis
+              containerPort: 6379
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            tcpSocket:
+              port: redis
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: redis
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.redis.resources | nindent 12 }}
+      volumes:
+        - name: data
+          {{- if .Values.redis.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "bot-service.componentName" (list . "redis-data") }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- with .Values.global.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

@@ -1,0 +1,13 @@
+apiVersion: v2
+name: bot-service
+description: Bot Service Lite (meetings-only Vexa fork) — self-hostable real-time meeting transcription control plane
+type: application
+# Chart version (SemVer). appVersion tracks the control-plane image tag the chart deploys.
+version: 0.12.1
+appVersion: "0.12.8"
+keywords:
+  - bot-service
+  - meeting-bot
+  - transcription
+maintainers:
+  - name: Bot Service Lite community

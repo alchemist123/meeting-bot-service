@@ -1,0 +1,147 @@
+{{- if .Values.runtime.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "bot-service.componentName" (list . "runtime") }}
+  labels:
+    {{- include "bot-service.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.runtime.replicaCount }}
+  {{- include "bot-service.deploymentStrategy" . | nindent 2 }}
+  selector:
+    matchLabels:
+      {{- include "bot-service.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: runtime
+  template:
+    metadata:
+      labels:
+        {{- include "bot-service.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: runtime
+      annotations:
+        {{- toYaml .Values.global.podAnnotations | nindent 8 }}
+    spec:
+      securityContext:
+        {{- toYaml .Values.global.podSecurityContext | nindent 8 }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if eq .Values.runtime.backend "k8s" }}
+      # The runtime spawns bot Pods via kubectl — bind the SA carrying the pod-spawn RBAC.
+      serviceAccountName: {{ include "bot-service.componentName" (list . "runtime") }}
+      {{- end }}
+      containers:
+        - name: runtime
+          securityContext:
+            {{- toYaml .Values.global.securityContext | nindent 12 }}
+          image: "{{ .Values.runtime.image.repository }}:{{ .Values.global.imageTag | default .Values.runtime.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8090
+          env:
+            - name: RUNTIME_BACKEND
+              value: {{ .Values.runtime.backend | quote }}
+            {{- if eq .Values.runtime.backend "k8s" }}
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            {{- end }}
+            {{- if eq .Values.runtime.backend "docker" }}
+            # The spawned bot joins the runtime's namespace network. On k8s the kernel resolves
+            # services by DNS; DOCKER_NETWORK only matters for the docker backend (single-node
+            # fallback).
+            - name: DOCKER_NETWORK
+              value: {{ .Values.runtime.dockerNetwork | default "" | quote }}
+            {{- end }}
+            - name: REDIS_URL
+              value: {{ include "bot-service.redisUrl" . | quote }}
+            - name: BROWSER_IMAGE
+              value: {{ include "bot-service.botImage" . | quote }}
+            - name: BOT_ALONE_SILENCE_WINDOW_MS
+              value: {{ .Values.runtime.aloneSilenceWindowMs | default "" | quote }}
+            - name: BOT_SPEAKER_MIN_AUDIO_SEC
+              value: {{ .Values.runtime.speakerStream.minAudioSec | default "" | quote }}
+            - name: BOT_SPEAKER_SUBMIT_INTERVAL_SEC
+              value: {{ .Values.runtime.speakerStream.submitIntervalSec | default "" | quote }}
+            - name: BOT_SPEAKER_CONFIRM_THRESHOLD
+              value: {{ .Values.runtime.speakerStream.confirmThreshold | default "" | quote }}
+            - name: BOT_SPEAKER_MAX_BUFFER_SEC
+              value: {{ .Values.runtime.speakerStream.maxBufferSec | default "" | quote }}
+            - name: BOT_SPEAKER_IDLE_TIMEOUT_SEC
+              value: {{ .Values.runtime.speakerStream.idleTimeoutSec | default "" | quote }}
+            - name: INTERNAL_API_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "bot-service.adminTokenSecretName" . }}
+                  key: INTERNAL_API_SECRET
+            - name: LOG_LEVEL
+              value: {{ .Values.runtime.logLevel | default "info" | quote }}
+            {{- if eq .Values.runtime.backend "k8s" }}
+            # Scheduling parity for SPAWNED Pods. A `kubectl run` bot Pod is not a child of this
+            # Deployment, so it inherits none of the nodeSelector/tolerations applied below at the
+            # pod spec. Hand the runtime its OWN scheduling constraints as JSON so the spawn
+            # backend can stamp them onto every spawned Pod — otherwise, on an all-tainted pool
+            # (dedicated / spot node pools), every spawn strands Pending and the meeting silently
+            # fails. Defaults to the runtime's own constraints (global.*); override per-runtime for
+            # a distinct spawn pool.
+            - name: RUNTIME_K8S_TOLERATIONS
+              value: {{ .Values.runtime.tolerations | default .Values.global.tolerations | toJson | quote }}
+            - name: RUNTIME_K8S_NODE_SELECTOR
+              value: {{ .Values.runtime.nodeSelector | default .Values.global.nodeSelector | toJson | quote }}
+            {{- end }}
+            {{- with .Values.runtime.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- if eq .Values.runtime.backend "docker" }}
+          volumeMounts:
+            - name: docker-sock
+              mountPath: /var/run/docker.sock
+          {{- end }}
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 40
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+          resources:
+            {{- toYaml .Values.runtime.resources | nindent 12 }}
+      {{- if eq .Values.runtime.backend "docker" }}
+      volumes:
+        - name: docker-sock
+          hostPath:
+            path: /var/run/docker.sock
+            type: Socket
+      {{- end }}
+      {{- with .Values.global.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with (include "bot-service.topologySpreadConstraints" (list . .Values.runtime "runtime")) }}
+      {{- . | nindent 6 }}
+      {{- end }}
+{{- end }}

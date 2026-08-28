@@ -1,0 +1,72 @@
+{{- if .Values.minio.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "bot-service.componentName" (list . "minio-init") }}
+  labels:
+    {{- include "bot-service.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    # Drop `hook-succeeded` from delete-policy so failed Jobs stay around for diagnosis.
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 5
+  template:
+    metadata:
+      labels:
+        {{- include "bot-service.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: minio-init
+    spec:
+      restartPolicy: Never
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: minio-init
+          image: minio/mc:latest
+          imagePullPolicy: IfNotPresent
+          # Poll-until-ready instead of a fixed sleep. On a fresh PVC, MinIO can take 30+ seconds to
+          # attach + initialize; a hardcoded sleep races MinIO startup and the bucket never gets
+          # created. Polling `mc admin info` waits up to 120s for genuine readiness; if MinIO
+          # genuinely isn't up after 2 minutes, exit non-zero so the Job retries (backoffLimit=5).
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              MINIO_HOST="http://{{ include "bot-service.componentName" (list . "minio") }}:{{ .Values.minio.service.port }}"
+              echo "Waiting for MinIO at $MINIO_HOST (up to 120s)..."
+              for attempt in $(seq 1 24); do
+                if mc alias set vexa "$MINIO_HOST" "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" 2>/dev/null && \
+                   mc admin info vexa >/dev/null 2>&1; then
+                  echo "MinIO ready after $((attempt * 5))s"
+                  break
+                fi
+                echo "MinIO not ready yet (attempt $attempt/24), sleeping 5s..."
+                sleep 5
+              done
+              # Final readiness check — fail loud if MinIO genuinely isn't up
+              mc admin info vexa
+              mc mb --ignore-existing vexa/{{ .Values.minio.bucket }}
+              echo "Bucket {{ .Values.minio.bucket }} ensured"
+              exit 0
+          env:
+            - name: MINIO_ROOT_USER
+              value: {{ .Values.minio.accessKey | quote }}
+            - name: MINIO_ROOT_PASSWORD
+              value: {{ .Values.minio.secretKey | quote }}
+      {{- with .Values.global.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
