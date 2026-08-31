@@ -59,6 +59,7 @@ push a health-check request through the gateway (see "Known boundaries" below).
 | `global.imageTag` | `""` | Set to a pinned tag — overrides every service tag (build-once). |
 | `runtime.backend` | `k8s` | `k8s` spawns Pods via RBAC (real cloud); `docker` mounts the host socket (single-node only); `process` runs child processes. |
 | `secrets.*` | placeholders | `adminApiToken`, `internalApiSecret`, `transcriptionServiceToken`. Or set `secrets.existingSecretName` (must carry `ADMIN_API_TOKEN`, `INTERNAL_API_SECRET`, `TRANSCRIPTION_SERVICE_TOKEN`). |
+| `secrets.sharedApiToken` | `""` | Opt-in single-secret auth — set it and any caller sending that value as `X-API-Key` authenticates with full scopes, no per-user token minting. Blank (default) leaves the per-user flow unchanged. |
 | `postgres.enabled` / `redis.enabled` / `minio.enabled` | `true` | Flip to `false` to use managed backing; then set `database.*` / `redisConfig.*` and a pre-existing `postgres.credentialsSecretName`. |
 | `ingress.enabled` | `false` | Fronts the **gateway** by default (the only HTTP service meant for external traffic); set `host`/`className`/`tls`. |
 | `minio.service.type` | `ClusterIP` | `NodePort` to reach presigned download URLs browser-side on dev clusters. |

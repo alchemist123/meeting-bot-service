@@ -162,6 +162,34 @@ def test_internal_validate_fail_closed_when_secret_unset(pg_url, pg_async_url, m
     _dispose_async_engine()
 
 
+def test_shared_api_token_disabled_by_default(client):
+    """SHARED_API_TOKEN unset (the client fixture never sets it) → the shared-secret bypass never
+    fires; an arbitrary token still 401s exactly like today. Regression guard for default-off."""
+    r = client.post("/internal/validate", headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    json={"token": "whatever-someone-guesses"})
+    assert r.status_code == 401
+
+
+def test_shared_api_token_bypasses_per_user_flow(client, monkeypatch):
+    """Set SHARED_API_TOKEN and a caller presenting that exact value authenticates with full
+    scopes + the sentinel identity — no user created, no token minted. A different value still
+    falls through to the (empty) per-user lookup and 401s."""
+    monkeypatch.setenv("SHARED_API_TOKEN", "shared-secret-value")
+
+    r = client.post("/internal/validate", headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    json={"token": "shared-secret-value"})
+    assert r.status_code == 200, r.text
+    v = r.json()
+    assert v["user_id"] == 0
+    assert set(v["scopes"]) == {"bot", "tx", "browser"}
+    assert v["email"] == "shared@local"
+    assert v["is_admin"] is False
+
+    r = client.post("/internal/validate", headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    json={"token": "not-the-shared-secret"})
+    assert r.status_code == 401
+
+
 def test_expired_token_rejected(client):
     """A token past expires_at must be rejected 401 by /internal/validate."""
     user_id = client.post("/admin/users", headers=_admin(),

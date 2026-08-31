@@ -99,6 +99,10 @@ services:
       - DB_PASSWORD=${DB_PASSWORD:-postgres}
       - ADMIN_API_TOKEN=${ADMIN_TOKEN:-changeme}
       - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-vexa-internal-secret}
+      # Opt-in single-secret auth: unset (default) leaves today's per-user token-mint flow
+      # unchanged. Set it and any caller sending this value as X-API-Key authenticates with full
+      # scopes — no per-user provisioning (bin/provision-token) needed.
+      - SHARED_API_TOKEN=${SHARED_API_TOKEN:-}
       - LOG_LEVEL=${LOG_LEVEL:-info}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8001/health').status==200 else 1)"]

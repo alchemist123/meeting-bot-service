@@ -47,6 +47,13 @@ make -C deploy/compose provision-token ADMIN_TOKEN=<your ADMIN_TOKEN>
 Mints an idempotent `bot,tx`-scoped token for `self-host@vexa.ai` (override `EMAIL=`), prints only
 the token.
 
+## Shared-secret auth (skip token provisioning entirely)
+
+Set `SHARED_API_TOKEN` in `.env` and send that exact value as `X-API-Key` on every request — it
+authenticates with full scopes, no `provision-token` step needed. Meant for a single self-hoster
+who wants one secret, not per-user accounts. Blank (default) leaves the per-user token flow above
+unchanged.
+
 ## Not included
 
 This fork ships the bare stack + the `bot` build target only — it does not carry upstream Vexa's

@@ -40,6 +40,9 @@ export LOG_LEVEL="${LOG_LEVEL:-info}"
 export DISPLAY="${DISPLAY:-:99}"
 export ADMIN_API_TOKEN="${ADMIN_API_TOKEN:-${ADMIN_TOKEN:-changeme}}"
 export INTERNAL_API_SECRET="${INTERNAL_API_SECRET:-lite-internal-secret}"
+# Optional: single shared secret for simple/self-host use — send it as X-API-Key on every request
+# and it authenticates with full scopes, no per-user token mint needed. Empty (default) disables it.
+export SHARED_API_TOKEN="${SHARED_API_TOKEN:-}"
 
 # Optional Google Meet speaker-stream tuning. Empty values preserve bot defaults; the runtime
 # profile forwards configured values to every spawned bot process.

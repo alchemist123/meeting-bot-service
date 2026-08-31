@@ -14,6 +14,11 @@ exercises:
 
   Token mint: scoped {bot,tx,browser}, optional multi-scope `?scopes=bot,tx`, optional expiry
   `?expires_in=<sec>`; an invalid scope → 422.
+
+  Shared-secret mode (opt-in, SHARED_API_TOKEN env, unset by default): /internal/validate accepts
+  this one value as X-API-Key for ANY caller, resolving full scopes + a fixed sentinel identity —
+  no per-user token mint needed. Does NOT unlock the user tier (/user/* still needs a real
+  APIToken row via get_current_user). See _shared_api_token().
 """
 import hmac
 import os
@@ -44,6 +49,25 @@ def _internal_secret() -> str:
 
 def _dev_mode() -> bool:
     return os.getenv("DEV_MODE", "false").lower() == "true"
+
+
+def _shared_api_token() -> Optional[str]:
+    """Opt-in single-secret auth (SHARED_API_TOKEN): unset by default. When set, ANY caller who
+    presents this exact value as their X-API-Key authenticates with full scopes and a fixed
+    sentinel identity — no per-user token minting. See /internal/validate."""
+    return os.getenv("SHARED_API_TOKEN") or None
+
+
+def _shared_api_max_concurrent() -> int:
+    try:
+        return int(os.getenv("SHARED_API_MAX_CONCURRENT_BOTS", "20"))
+    except ValueError:
+        return 20
+
+
+# Sentinel identity for the shared-token path. meetings.user_id is a plain indexed integer, not an
+# enforced FK (schema/models.py) — this needs no real `users` row.
+SHARED_TOKEN_USER_ID = 0
 
 
 async def verify_admin_token(admin_api_key: str = Security(ADMIN_KEY_HEADER)):
@@ -469,6 +493,19 @@ def create_app() -> FastAPI:
         token = payload.get("token", "")
         if not token:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Missing token")
+
+        # Shared-secret bypass (opt-in via SHARED_API_TOKEN): a single env-configured token
+        # authenticates with full scopes, no DB-backed per-user APIToken required. Falls through
+        # to the normal per-user lookup below when unset or non-matching.
+        shared_token = _shared_api_token()
+        if shared_token and hmac.compare_digest(token, shared_token):
+            return {
+                "user_id": SHARED_TOKEN_USER_ID,
+                "scopes": sorted(VALID_SCOPES),
+                "max_concurrent": _shared_api_max_concurrent(),
+                "email": "shared@local",
+                "is_admin": False,
+            }
 
         row = (await db.execute(
             select(APIToken, User).join(User, APIToken.user_id == User.id)

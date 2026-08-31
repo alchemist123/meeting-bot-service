@@ -36,6 +36,9 @@ Grab your API key once it's up:
 docker logs bot-service-lite | grep VEXA_API_KEY
 ```
 
+Or skip minting entirely: set `SHARED_API_TOKEN` in the repo-root `.env` before `make lite` and use
+that exact value as your API key — no per-user token needed (see Configuration below).
+
 ### Transcripts with no token and no GPU — `LOCAL_STT=1`
 
 ```bash
@@ -106,6 +109,7 @@ The repo-root `.env` (see [`.env.example`](../../.env.example)):
 |---|---|---|
 | `TRANSCRIPTION_SERVICE_URL` / `_TOKEN` | — | STT endpoint + key for the bot's transcript pipeline. Unset → bots capture, no transcript. |
 | `ADMIN_TOKEN` | `changeme` | admin API token (the stack's shared admin secret) |
+| `SHARED_API_TOKEN` | — (disabled) | optional single shared secret — set it and use that exact value as `X-API-Key`, no minted per-user key needed |
 | `IMAGE_TAG` | `latest` | the image tag to pull (a local `bot-service-lite:dev` build wins) |
 
 `make` variables (not `.env`) for the bundled local STT: `LOCAL_STT=1` (off by default),

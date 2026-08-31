@@ -77,6 +77,13 @@ curl -X DELETE -H "X-API-Key: $API_KEY" "$API_BASE/bots/google_meet/abc-defg-hij
 `platform` is `google_meet` · `teams` · `zoom` · `jitsi`; `native_meeting_id` is the code from the
 join URL.
 
+#### Skip token provisioning: `SHARED_API_TOKEN`
+
+For a single self-hoster who doesn't want per-user accounts, set `SHARED_API_TOKEN` in `.env` and
+use that exact value as `$API_KEY` above — no minted token needed. It authenticates with full
+scopes (`bot`, `tx`, `browser`). Blank (default) leaves the per-user token flow unchanged. See
+[`deploy/compose/README.md`](deploy/compose/README.md#shared-secret-auth-skip-token-provisioning-entirely).
+
 ---
 
 ## API reference

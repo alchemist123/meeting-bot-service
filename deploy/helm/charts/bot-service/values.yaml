@@ -53,6 +53,10 @@ secrets:
   internalApiSecret: ""             # gateway<->admin-api<->meeting-api internal calls (default vexa-internal-secret)
   transcriptionServiceToken: ""     # funded STT token threaded into spawned bots
   azureStorageConnectionString: ""  # only used when meetingApi.storageBackend=azure_blob
+  # Optional: single shared secret for simple/self-host use. Send it as `X-API-Key` on every
+  # request and it authenticates with full scopes — no per-user token minting needed. Blank
+  # (default) disables this path entirely; falls back to minted per-user tokens.
+  sharedApiToken: ""
 
 # ---------- Shared backing config ----------
 database:
